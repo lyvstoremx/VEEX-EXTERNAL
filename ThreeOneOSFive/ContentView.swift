@@ -132,13 +132,15 @@ final class VexxEngine: ObservableObject {
                 if isOn {
                     try Self.restoreOne(item)
                     await MainActor.run {
-                        self.active.remove(item.id); self.busyID = nil
+                        _ = self.active.remove(item.id)
+                        self.busyID = nil
                         VexxVoice.play(.off)
                     }
                 } else {
                     try Self.applyOne(item)
                     await MainActor.run {
-                        self.active.insert(item.id); self.busyID = nil
+                        self.active.insert(item.id)
+                        self.busyID = nil
                         VexxVoice.play(.on)
                     }
                 }
@@ -161,7 +163,7 @@ final class VexxEngine: ObservableObject {
             for item in targets {
                 do {
                     try Self.restoreOne(item)
-                    await MainActor.run { self.active.remove(item.id) }
+                    await MainActor.run { _ = self.active.remove(item.id) }
                 } catch {
                     await MainActor.run { self.error = "\(error)" }
                 }
@@ -170,7 +172,7 @@ final class VexxEngine: ObservableObject {
         }
     }
 
-    private static func applyOne(_ item: PatchLibraryItem) throws {
+    private nonisolated static func applyOne(_ item: PatchLibraryItem) throws {
         guard let base = item.project else { return }
         let project = item.summary.schemaVersion >= 2 && item.canInspectContents
             ? try PatchProjectLibrary.synchronizeWorkspace(item: item)
@@ -178,7 +180,7 @@ final class VexxEngine: ObservableObject {
         _ = try DevicePatchService.apply(project: project)
     }
 
-    private static func restoreOne(_ item: PatchLibraryItem) throws {
+    private nonisolated static func restoreOne(_ item: PatchLibraryItem) throws {
         guard let receipt = DevicePatchService.latestReceipt(projectID: item.id) else { return }
         let inspection = try DevicePatchService.inspectRestore(receipt: receipt)
         try DevicePatchService.restore(
