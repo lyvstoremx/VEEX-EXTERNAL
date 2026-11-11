@@ -621,7 +621,7 @@ struct VexxSettings: View {
                         license.signOut()
                         dismiss()
                     } label: {
-                        Label("Trash", systemImage: "trash.fill")
+                        Label("Borrar key", systemImage: "trash.fill")
                     }
                 } header: {
                     Text("Tu key")
