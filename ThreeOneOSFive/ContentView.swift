@@ -141,28 +141,46 @@ enum VexxCatalog {
 }
 
 enum VexxMatch {
-    static func item(for row: VexxRow, in items: [PatchLibraryItem]) -> PatchLibraryItem? {
+    static func score(_ row: VexxRow, _ item: PatchLibraryItem) -> Int {
         let key = row.file.replacingOccurrences(of: ".3105", with: "").lowercased()
+        let full = row.file.lowercased()
+        let f = item.packageURL.deletingPathExtension().lastPathComponent.lowercased()
+        let n = (item.project?.name ?? "").lowercased()
 
-        func tokens(_ i: PatchLibraryItem) -> [String] {
-            [
-                i.packageURL.lastPathComponent.lowercased(),
-                i.packageURL.deletingPathExtension().lastPathComponent.lowercased(),
-                (i.project?.name ?? "").lowercased()
-            ].filter { !$0.isEmpty }
+        var best = 0
+        for t in [f, n] where !t.isEmpty {
+            if t == key || t == full {
+                best = max(best, 100)
+            } else if t.hasPrefix(key) {
+                best = max(best, 60 - abs(t.count - key.count))
+            } else if key.hasPrefix(t) {
+                best = max(best, 50 - abs(key.count - t.count))
+            } else if t.contains(key) || key.contains(t) {
+                best = max(best, 30)
+            }
+        }
+        return best
+    }
+
+    static func assignment(
+        rows: [VexxRow],
+        items: [PatchLibraryItem]
+    ) -> [String: PatchLibraryItem] {
+        var candidates: [(rowID: String, item: PatchLibraryItem, score: Int)] = []
+        for row in rows {
+            let scored = items.map { (item: $0, score: score(row, $0)) }.filter { $0.score > 0 }
+            guard let top = scored.max(by: { $0.score < $1.score }) else { continue }
+            candidates.append((row.id, top.item, top.score))
         }
 
-        let mine = [row.file.lowercased(), key]
-
-        if let exact = items.first(where: { i in
-            tokens(i).contains { t in mine.contains(t) }
-        }) {
-            return exact
+        var result: [String: PatchLibraryItem] = [:]
+        var used = Set<UUID>()
+        for candidate in candidates.sorted(by: { $0.score > $1.score }) {
+            guard !used.contains(candidate.item.id) else { continue }
+            used.insert(candidate.item.id)
+            result[candidate.rowID] = candidate.item
         }
-
-        return items.first(where: { i in
-            tokens(i).contains { t in mine.contains { m in t.contains(m) || m.contains(t) } }
-        })
+        return result
     }
 }
 
@@ -185,11 +203,11 @@ final class VexxEngine: ObservableObject {
 
         Task.detached(priority: .userInitiated) {
             do {
-                let already = await MainActor.run {
-                    VexxMatch.item(for: row, in: store.items)
+                var map = await MainActor.run {
+                    VexxMatch.assignment(rows: VexxCatalog.rows, items: store.items)
                 }
 
-                if let existing = already,
+                if let existing = map[row.id],
                    await MainActor.run(body: { self.active.contains(existing.id) }) {
                     try Self.restoreOne(existing)
                     await MainActor.run {
@@ -204,7 +222,7 @@ final class VexxEngine: ObservableObject {
                     let others = await MainActor.run {
                         VexxCatalog.rows
                             .filter { $0.tab == .aimbots && $0.id != row.id }
-                            .compactMap { VexxMatch.item(for: $0, in: store.items) }
+                            .compactMap { map[$0.id] }
                             .filter { self.active.contains($0.id) }
                     }
                     for other in others {
@@ -213,15 +231,14 @@ final class VexxEngine: ObservableObject {
                     }
                 }
 
-                var target = await MainActor.run {
-                    VexxMatch.item(for: row, in: store.items)
-                }
+                var target = map[row.id]
 
                 if target == nil {
                     try await Self.importBundled(row: row, store: store)
-                    target = await MainActor.run {
-                        VexxMatch.item(for: row, in: store.items)
+                    map = await MainActor.run {
+                        VexxMatch.assignment(rows: VexxCatalog.rows, items: store.items)
                     }
+                    target = map[row.id]
                 }
 
                 guard let item = target else { throw VexxError.notBundled }
@@ -260,7 +277,10 @@ final class VexxEngine: ObservableObject {
         for _ in 0..<24 {
             try? await Task.sleep(nanoseconds: 250_000_000)
             let done = await MainActor.run {
-                !store.isBusy && VexxMatch.item(for: row, in: store.items) != nil
+                !store.isBusy && VexxMatch.assignment(
+                    rows: VexxCatalog.rows,
+                    items: store.items
+                )[row.id] != nil
             }
             if done { return }
         }
@@ -572,8 +592,9 @@ struct VexxMain: View {
                     .animation(VexxTheme.spring, value: tab)
 
                     List {
+                        let map = VexxMatch.assignment(rows: VexxCatalog.rows, items: store.items)
                         ForEach(VexxCatalog.rows.filter { $0.tab == tab }) { row in
-                            VexxSwitchRow(row: row, engine: engine, items: store.items)
+                            VexxSwitchRow(row: row, engine: engine, item: map[row.id])
                                 .transition(.opacity.combined(with: .move(edge: .trailing)))
                         }
                     }
@@ -639,11 +660,7 @@ struct VexxSwitchRow: View {
     @EnvironmentObject private var store: PatchProjectStore
     let row: VexxRow
     @ObservedObject var engine: VexxEngine
-    let items: [PatchLibraryItem]
-
-    private var item: PatchLibraryItem? {
-        VexxMatch.item(for: row, in: items)
-    }
+    let item: PatchLibraryItem?
 
     private var isOn: Bool {
         item.map { engine.active.contains($0.id) } ?? false
