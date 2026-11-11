@@ -1,0 +1,24 @@
+name: build
+on: workflow_dispatch
+jobs:
+  ipa:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Schemes
+        run: xcodebuild -list -project ThreeOneOSFive.xcodeproj
+      - name: Build
+        run: |
+          xcodebuild -project ThreeOneOSFive.xcodeproj -scheme ThreeOneOSFive \
+            -configuration Release -sdk iphoneos -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+            -destination 'generic/platform=iOS'
+      - name: Package
+        run: |
+          mkdir -p out/Payload
+          cp -R build/Build/Products/Release-iphoneos/*.app out/Payload/
+          cd out && zip -qry ../app.ipa Payload
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ipa
+          path: app.ipa
