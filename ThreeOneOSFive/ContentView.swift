@@ -82,6 +82,9 @@ enum VexxTheme {
     static let bgBottom = Color(red: 0.02, green: 0.03, blue: 0.06)
     static let card     = Color.white.opacity(0.06)
     static let stroke   = Color.white.opacity(0.12)
+    static let on       = Color(red: 0.30, green: 0.85, blue: 0.50)
+    static let off      = Color(red: 0.95, green: 0.35, blue: 0.40)
+    static let spring   = Animation.spring(response: 0.32, dampingFraction: 0.68)
 }
 
 enum VexxEvent: String { case on, off, error, gate }
@@ -202,6 +205,8 @@ final class VexxEngine: ObservableObject {
 final class VexxLicense: ObservableObject {
     @Published var isValid = false
     @Published var error: String?
+    @Published private(set) var expiry: Date?
+    @Published private(set) var storedKey: String = ""
 
     static let masterKey = "VEEX-LEVI-2004"
     static let ownerID   = "2BC18D89"
@@ -219,15 +224,30 @@ final class VexxLicense: ObservableObject {
     }
 
     init() {
-        let exp = UserDefaults.standard.double(forKey: "vexx.exp")
-        isValid = exp == .infinity || (exp > 0 && Date(timeIntervalSince1970: exp) > Date())
+        let t = UserDefaults.standard.double(forKey: "vexx.exp")
+        storedKey = UserDefaults.standard.string(forKey: "vexx.key") ?? ""
+        if t == .infinity {
+            isValid = true
+            expiry = nil
+        } else if t > 0 {
+            let d = Date(timeIntervalSince1970: t)
+            expiry = d
+            isValid = d > Date()
+        }
+    }
+
+    var remainingText: String {
+        guard let expiry else { return "Permanente" }
+        let days = Calendar.current.dateComponents([.day], from: Date(), to: expiry).day ?? 0
+        if days <= 0 { return "Vence hoy" }
+        return days == 1 ? "1 día restante" : "\(days) días restantes"
     }
 
     func activate(_ raw: String) {
         let c = norm(raw)
         if c == norm(Self.masterKey) {
             if Self.ownerID == "REEMPLAZA" || Self.ownerID == Self.deviceID {
-                grant(nil)
+                grant(nil, key: raw.uppercased())
             } else { error = "Esta key es de otro dispositivo" }
             return
         }
@@ -238,12 +258,24 @@ final class VexxLicense: ObservableObject {
         guard let exp = decodeExpiry(expPart) else { error = "Key inválida"; return }
         guard sig == sign(expiry: expPart) else { error = "Key incorrecta"; return }
         guard exp > Date() else { error = "Key vencida"; return }
-        grant(exp)
+        grant(exp, key: raw.uppercased())
     }
 
-    private func grant(_ exp: Date?) {
-        isValid = true; error = nil
+    func signOut() {
+        isValid = false
+        expiry = nil
+        storedKey = ""
+        UserDefaults.standard.removeObject(forKey: "vexx.exp")
+        UserDefaults.standard.removeObject(forKey: "vexx.key")
+    }
+
+    private func grant(_ exp: Date?, key: String) {
+        isValid = true
+        error = nil
+        expiry = exp
+        storedKey = key
         UserDefaults.standard.set(exp?.timeIntervalSince1970 ?? .infinity, forKey: "vexx.exp")
+        UserDefaults.standard.set(key, forKey: "vexx.key")
     }
 
     private func sign(expiry: String) -> String {
@@ -274,132 +306,150 @@ struct VexxRoot: View {
     @State private var appeared = false
 
     var body: some View {
-        if license.isValid {
-            VexxMain(engine: engine)
-                .task {
-                    appState.detectSupport()
-                    engine.refresh(store.items)
-                }
-        } else {
-            ZStack {
-                LinearGradient(
-                    colors: [VexxTheme.bgTop, VexxTheme.bgBottom],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
+        Group {
+            if license.isValid {
+                VexxMain(engine: engine, license: license)
+                    .transition(.opacity)
+                    .task {
+                        appState.detectSupport()
+                        engine.refresh(store.items)
+                    }
+            } else {
+                gate
+            }
+        }
+        .animation(.easeInOut(duration: 0.3), value: license.isValid)
+    }
+
+    private var gate: some View {
+        ZStack {
+            LinearGradient(colors: [VexxTheme.bgTop, VexxTheme.bgBottom], startPoint: .top, endPoint: .bottom)
                 .ignoresSafeArea()
 
-                RadialGradient(
-                    colors: [VexxTheme.accent.opacity(0.22), .clear],
-                    center: .top,
-                    startRadius: 10,
-                    endRadius: 340
-                )
-                .ignoresSafeArea()
+            RadialGradient(
+                colors: [VexxTheme.accent.opacity(0.26), .clear],
+                center: .top,
+                startRadius: 10,
+                endRadius: 360
+            )
+            .ignoresSafeArea()
 
-                VStack(spacing: 0) {
-                    Spacer()
+            VStack(spacing: 0) {
+                Spacer()
 
-                    Text("VEEX")
-                        .font(.system(size: 62, weight: .black))
-                        .tracking(10)
-                        .foregroundStyle(
-                            LinearGradient(
-                                colors: [VexxTheme.accentHi, VexxTheme.accent],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                        )
-                        .shadow(color: VexxTheme.accent.opacity(0.55), radius: 22)
-
-                    Text("BY LEVI")
-                        .font(.system(size: 12, weight: .semibold))
-                        .tracking(5)
-                        .foregroundStyle(.white.opacity(0.45))
-                        .padding(.top, 8)
-
-                    Spacer().frame(height: 46)
-
-                    HStack(spacing: 10) {
-                        Image(systemName: "key.fill")
-                            .font(.footnote)
-                            .foregroundStyle(VexxTheme.accent.opacity(0.8))
-                        TextField("VEEX-XXXX-XXX", text: $input)
-                            .textInputAutocapitalization(.characters)
-                            .autocorrectionDisabled()
-                            .font(.system(.subheadline, design: .monospaced))
-                            .foregroundStyle(.white)
-                            .tint(VexxTheme.accent)
-                    }
-                    .padding(.horizontal, 18)
-                    .frame(height: 54)
-                    .background(VexxTheme.card, in: .rect(cornerRadius: 16))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 16)
-                            .stroke(input.isEmpty ? VexxTheme.stroke : VexxTheme.accent.opacity(0.7), lineWidth: 1)
-                    )
-
-                    HStack(spacing: 7) {
-                        Circle()
-                            .fill(appState.isSupported ? Color.green : Color.red)
-                            .frame(width: 7, height: 7)
-                        Text(appState.isSupported ? "iOS \(AppInfo.osVersion) soportado" : "iOS \(AppInfo.osVersion) no soportado")
-                            .font(.caption2.weight(.medium))
-                            .foregroundStyle(.white.opacity(0.55))
-                    }
-                    .padding(.top, 14)
-
-                    if let e = license.error {
-                        Text(e)
-                            .font(.caption)
-                            .foregroundStyle(Color(red: 1, green: 0.45, blue: 0.45))
-                            .padding(.top, 10)
-                    }
-
-                    Button {
-                        license.activate(input)
-                        if license.isValid { VexxVoice.play(.gate) }
-                    } label: {
-                        Text("Continuar")
-                            .font(.subheadline.weight(.bold))
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 52)
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(VexxTheme.bgBottom)
-                    .background(
+                Text("VEEX")
+                    .font(.system(size: 64, weight: .black))
+                    .tracking(11)
+                    .foregroundStyle(
                         LinearGradient(
                             colors: [VexxTheme.accentHi, VexxTheme.accent],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        ),
-                        in: .rect(cornerRadius: 16)
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
                     )
-                    .disabled(!appState.isSupported || input.isEmpty)
-                    .opacity(!appState.isSupported || input.isEmpty ? 0.45 : 1)
-                    .padding(.top, 26)
+                    .shadow(color: VexxTheme.accent.opacity(0.6), radius: 26)
+                    .scaleEffect(appeared ? 1 : 0.92)
+                    .opacity(appeared ? 1 : 0)
 
-                    Spacer()
+                Text("BY LEVI")
+                    .font(.system(size: 12, weight: .bold))
+                    .tracking(6)
+                    .foregroundStyle(.white.opacity(0.42))
+                    .padding(.top, 9)
+                    .opacity(appeared ? 1 : 0)
 
-                    HStack(spacing: 22) {
-                        Link(destination: URL(string: "https://t.me/levibrouhy")!) {
-                            Label("levibrouhy", systemImage: "paperplane.fill")
-                        }
-                        Link(destination: URL(string: "https://t.me/levibrouhs")!) {
-                            Label("Canal", systemImage: "megaphone.fill")
-                        }
-                    }
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(VexxTheme.accent.opacity(0.85))
-                    .padding(.bottom, 18)
+                Spacer().frame(height: 48)
+
+                HStack(spacing: 10) {
+                    Image(systemName: "key.fill")
+                        .font(.footnote)
+                        .foregroundStyle(VexxTheme.accent.opacity(0.85))
+                    TextField("VEEX-XXXX-XXX", text: $input)
+                        .textInputAutocapitalization(.characters)
+                        .autocorrectionDisabled()
+                        .font(.system(.subheadline, design: .monospaced))
+                        .foregroundStyle(.white)
+                        .tint(VexxTheme.accent)
                 }
-                .padding(.horizontal, 30)
+                .padding(.horizontal, 18)
+                .frame(height: 56)
+                .background(VexxTheme.card, in: .rect(cornerRadius: 18))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 18)
+                        .stroke(
+                            input.isEmpty ? VexxTheme.stroke : VexxTheme.accent.opacity(0.75),
+                            lineWidth: 1
+                        )
+                )
+                .shadow(color: input.isEmpty ? .clear : VexxTheme.accent.opacity(0.35), radius: 14)
+                .animation(VexxTheme.spring, value: input.isEmpty)
+
+                HStack(spacing: 7) {
+                    Circle()
+                        .fill(appState.isSupported ? VexxTheme.on : VexxTheme.off)
+                        .frame(width: 7, height: 7)
+                    Text(appState.isSupported
+                         ? "iOS \(AppInfo.osVersion) soportado"
+                         : "iOS \(AppInfo.osVersion) no soportado")
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(.white.opacity(0.55))
+                }
+                .padding(.top, 15)
+
+                if let e = license.error {
+                    Text(e)
+                        .font(.caption)
+                        .foregroundStyle(VexxTheme.off)
+                        .padding(.top, 11)
+                        .transition(.opacity)
+                }
+
+                Button {
+                    license.activate(input)
+                    if license.isValid { VexxVoice.play(.gate) }
+                } label: {
+                    Text("Continuar")
+                        .font(.subheadline.weight(.bold))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 54)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(VexxTheme.bgBottom)
+                .background(
+                    LinearGradient(
+                        colors: [VexxTheme.accentHi, VexxTheme.accent],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    ),
+                    in: .rect(cornerRadius: 18)
+                )
+                .shadow(color: VexxTheme.accent.opacity(0.45), radius: 18)
+                .disabled(!appState.isSupported || input.isEmpty)
+                .opacity(!appState.isSupported || input.isEmpty ? 0.45 : 1)
+                .scaleEffect(input.isEmpty ? 0.99 : 1)
+                .animation(VexxTheme.spring, value: input.isEmpty)
+                .padding(.top, 28)
+
+                Spacer()
+
+                HStack(spacing: 22) {
+                    Link(destination: URL(string: "https://t.me/levibrouh")!) {
+                        Label("levibrouh", systemImage: "paperplane.fill")
+                    }
+                    Link(destination: URL(string: "https://t.me/levibrouhs")!) {
+                        Label("Canal", systemImage: "megaphone.fill")
+                    }
+                }
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(VexxTheme.accent.opacity(0.85))
+                .padding(.bottom, 18)
                 .opacity(appeared ? 1 : 0)
             }
-            .task {
-                appState.detectSupport()
-                withAnimation(.easeOut(duration: 0.5)) { appeared = true }
-            }
+            .padding(.horizontal, 30)
+        }
+        .task {
+            appState.detectSupport()
+            withAnimation(.easeOut(duration: 0.55)) { appeared = true }
         }
     }
 }
@@ -407,18 +457,15 @@ struct VexxRoot: View {
 struct VexxMain: View {
     @EnvironmentObject private var store: PatchProjectStore
     @ObservedObject var engine: VexxEngine
+    @ObservedObject var license: VexxLicense
     @State private var tab: VexxTab = .aimbots
     @State private var showSettings = false
 
     var body: some View {
         NavigationStack {
             ZStack {
-                LinearGradient(
-                    colors: [VexxTheme.bgTop, VexxTheme.bgBottom],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-                .ignoresSafeArea()
+                LinearGradient(colors: [VexxTheme.bgTop, VexxTheme.bgBottom], startPoint: .top, endPoint: .bottom)
+                    .ignoresSafeArea()
 
                 VStack(spacing: 0) {
                     Picker("", selection: $tab) {
@@ -426,20 +473,26 @@ struct VexxMain: View {
                     }
                     .pickerStyle(.segmented)
                     .padding(.horizontal)
+                    .animation(VexxTheme.spring, value: tab)
 
                     List {
                         ForEach(VexxCatalog.rows.filter { $0.tab == tab }) { row in
                             VexxSwitchRow(row: row, engine: engine, items: store.items)
+                                .transition(.opacity.combined(with: .move(edge: .trailing)))
                         }
                     }
                     .listStyle(.plain)
                     .scrollContentBackground(.hidden)
+                    .animation(VexxTheme.spring, value: tab)
 
                     Button { openFF() } label: {
-                        Text("ABRIR FREE FIRE")
-                            .font(.subheadline.weight(.bold))
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 54)
+                        HStack(spacing: 9) {
+                            Image(systemName: "flame.fill")
+                            Text("ABRIR FREE FIRE")
+                        }
+                        .font(.subheadline.weight(.bold))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 56)
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(VexxTheme.bgBottom)
@@ -449,8 +502,9 @@ struct VexxMain: View {
                             startPoint: .leading,
                             endPoint: .trailing
                         ),
-                        in: .rect(cornerRadius: 16)
+                        in: .rect(cornerRadius: 18)
                     )
+                    .shadow(color: VexxTheme.accent.opacity(0.45), radius: 18)
                     .padding(.horizontal)
                     .padding(.bottom, 10)
                 }
@@ -463,7 +517,9 @@ struct VexxMain: View {
                         .foregroundStyle(VexxTheme.accent)
                 }
             }
-            .sheet(isPresented: $showSettings) { VexxSettings(engine: engine) }
+            .sheet(isPresented: $showSettings) {
+                VexxSettings(engine: engine, license: license)
+            }
             .task { engine.refresh(store.items) }
         }
     }
@@ -486,38 +542,84 @@ struct VexxSwitchRow: View {
         items.first { $0.project?.name.localizedCaseInsensitiveContains(row.match) == true }
     }
 
+    private var isOn: Bool {
+        item.map { engine.active.contains($0.id) } ?? false
+    }
+
     var body: some View {
         Toggle(isOn: Binding(
-            get: { item.map { engine.active.contains($0.id) } ?? false },
+            get: { isOn },
             set: { _ in if let item { engine.toggle(item) } }
         )) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(row.title)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.white)
-                if item == nil {
-                    Text("parche no encontrado")
-                        .font(.caption2)
-                        .foregroundStyle(.orange)
+            HStack(spacing: 11) {
+                Circle()
+                    .fill(isOn ? VexxTheme.on : VexxTheme.off)
+                    .frame(width: 8, height: 8)
+                    .shadow(color: (isOn ? VexxTheme.on : VexxTheme.off).opacity(0.8), radius: 6)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(row.title)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white)
+                    if item == nil {
+                        Text("parche no encontrado")
+                            .font(.caption2)
+                            .foregroundStyle(.orange)
+                    }
                 }
             }
         }
-        .tint(VexxTheme.accent)
+        .tint(isOn ? VexxTheme.on : VexxTheme.off)
         .disabled(item == nil || engine.busyID != nil)
-        .listRowBackground(VexxTheme.card)
+        .listRowBackground(
+            RoundedRectangle(cornerRadius: 14)
+                .fill(isOn ? VexxTheme.on.opacity(0.12) : VexxTheme.card)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14)
+                        .stroke(isOn ? VexxTheme.on.opacity(0.4) : .clear, lineWidth: 1)
+                )
+        )
+        .animation(VexxTheme.spring, value: isOn)
     }
 }
 
 struct VexxSettings: View {
     @EnvironmentObject private var store: PatchProjectStore
     @ObservedObject var engine: VexxEngine
+    @ObservedObject var license: VexxLicense
     @Environment(\.dismiss) private var dismiss
     @State private var confirmRestore = false
+    @State private var copied = false
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section {
+            List {
+                Section("Tu key") {
+                    HStack {
+                        Label("Tiempo", systemImage: "clock.fill")
+                        Spacer()
+                        Text(license.remainingText)
+                            .foregroundStyle(license.expiry == nil ? VexxTheme.on : .secondary)
+                    }
+                    HStack {
+                        Label("Dispositivos", systemImage: "iphone")
+                        Spacer()
+                        Text("1 · este iPhone").foregroundStyle(.secondary)
+                    }
+                    Button {
+                        UIPasteboard.general.string = license.storedKey
+                        copied = true
+                    } label: {
+                        Label(copied ? "Key guardada" : "Guardar key", systemImage: "doc.on.doc.fill")
+                    }
+                    Button(role: .destructive) {
+                        license.signOut()
+                        dismiss()
+                    } label: {
+                        Label("Borrar key", systemImage: "trash.fill")
+                    }
+                }
+
+                Section("Parches") {
                     Button("Restaurar todo") { confirmRestore = true }
                         .disabled(engine.busyID != nil)
                     if let e = engine.error {
@@ -526,8 +628,16 @@ struct VexxSettings: View {
                 } footer: {
                     Text("Desactiva todos los parches activos.")
                 }
+
+                Section {
+                    Link("t.me/levibrouh", destination: URL(string: "https://t.me/levibrouh")!)
+                    Link("t.me/levibrouhs", destination: URL(string: "https://t.me/levibrouhs")!)
+                } header: {
+                    Text("Telegram")
+                }
             }
             .navigationTitle("Ajustes")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar { Button("Listo") { dismiss() } }
             .confirmationDialog(
                 "¿Restaurar todos los parches?",
