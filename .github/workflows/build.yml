@@ -19,8 +19,12 @@ jobs:
       - name: Embed content
         run: |
           APP=$(ls -d build/Build/Products/Release-iphoneos/*.app)
-          if [ -d patches ]; then cp -R patches/*.3105 "$APP"/ ; fi
-          if [ -d voices ]; then cp -R voices/*.m4a "$APP"/ ; fi
+          if [ -d patches ]; then
+            find patches -maxdepth 1 -type f -name "*.3105" -exec cp {} "$APP"/ \;
+          fi
+          if [ -d voices ]; then
+            find voices -maxdepth 1 -type f \( -name "*.mp3" -o -name "*.m4a" -o -name "*.wav" \) -exec cp {} "$APP"/ \;
+          fi
           ls "$APP"
       - name: Package
         run: |
