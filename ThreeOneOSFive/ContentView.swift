@@ -97,7 +97,17 @@ struct VexxPressStyle: ButtonStyle {
     }
 }
 
-enum VexxError: Error { case notBundled, importFailed }
+enum VexxError: Error, CustomStringConvertible {
+    case notBundled
+    case importFailed(String)
+
+    var description: String {
+        switch self {
+        case .notBundled: return "parche no encontrado en el paquete"
+        case .importFailed(let reason): return "import falló: \(reason)"
+        }
+    }
+}
 
 enum VexxEvent: String { case on, off, error, gate }
 
@@ -271,26 +281,42 @@ final class VexxEngine: ObservableObject {
             throw VexxError.notBundled
         }
 
-        for attempt in 0..<3 {
-            await MainActor.run {
-                _ = store.importPackage(data: data, password: VexxCatalog.password)
+        var lastReason = "desconocido"
+
+        for _ in 0..<3 {
+            while await MainActor.run(body: { store.isBusy }) {
+                try? await Task.sleep(nanoseconds: 200_000_000)
             }
-            for _ in 0..<20 {
+
+            await MainActor.run { store.alert = nil }
+
+            let started = await MainActor.run {
+                store.importPackage(data: data, password: VexxCatalog.password)
+            }
+            if !started {
+                lastReason = "biblioteca ocupada"
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                continue
+            }
+
+            for _ in 0..<24 {
                 try? await Task.sleep(nanoseconds: 250_000_000)
-                let done = await MainActor.run {
-                    !store.isBusy && VexxMatch.assignment(
-                        rows: VexxCatalog.rows,
-                        items: store.items
-                    )[row.id] != nil
+                let state = await MainActor.run {
+                    (
+                        store.alert?.messageKey,
+                        VexxMatch.assignment(rows: VexxCatalog.rows, items: store.items)[row.id] != nil
+                    )
                 }
-                if done { return }
+                if state.1 { return }
+                if let key = state.0 {
+                    lastReason = key
+                    break
+                }
             }
-            if attempt < 2 {
-                await MainActor.run { store.alert = nil }
-                try? await Task.sleep(nanoseconds: 800_000_000)
-            }
+            try? await Task.sleep(nanoseconds: 500_000_000)
         }
-        throw VexxError.importFailed
+
+        throw VexxError.importFailed(lastReason)
     }
 
     private nonisolated static func applyOne(_ item: PatchLibraryItem) throws {
@@ -600,7 +626,7 @@ struct VexxMain: View {
                         Text(error)
                             .font(.caption2.monospaced())
                             .foregroundStyle(VexxTheme.off)
-                            .lineLimit(2)
+                            .lineLimit(3)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.horizontal, 14)
                             .padding(.vertical, 8)
