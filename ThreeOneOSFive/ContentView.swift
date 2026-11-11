@@ -97,6 +97,8 @@ struct VexxPressStyle: ButtonStyle {
     }
 }
 
+enum VexxError: Error { case notBundled, importFailed }
+
 enum VexxEvent: String { case on, off, error, gate }
 
 enum VexxVoice {
@@ -138,38 +140,97 @@ enum VexxCatalog {
     ]
 }
 
+enum VexxMatch {
+    static func item(for row: VexxRow, in items: [PatchLibraryItem]) -> PatchLibraryItem? {
+        let key = row.file.replacingOccurrences(of: ".3105", with: "").lowercased()
+
+        func tokens(_ i: PatchLibraryItem) -> [String] {
+            [
+                i.packageURL.lastPathComponent.lowercased(),
+                i.packageURL.deletingPathExtension().lastPathComponent.lowercased(),
+                (i.project?.name ?? "").lowercased()
+            ].filter { !$0.isEmpty }
+        }
+
+        let mine = [row.file.lowercased(), key]
+
+        if let exact = items.first(where: { i in
+            tokens(i).contains { t in mine.contains(t) }
+        }) {
+            return exact
+        }
+
+        return items.first(where: { i in
+            tokens(i).contains { t in mine.contains { m in t.contains(m) || m.contains(t) } }
+        })
+    }
+}
+
 @MainActor
 final class VexxEngine: ObservableObject {
     @Published private(set) var active: Set<UUID> = []
     @Published var busyID: UUID?
     @Published var error: String?
     @Published var seedLog: [String] = []
+    @Published var retryToken = 0
 
     func refresh(_ items: [PatchLibraryItem]) {
         active = Set(items.filter { DevicePatchService.latestReceipt(projectID: $0.id) != nil }.map(\.id))
     }
 
-    func toggle(_ item: PatchLibraryItem) {
+    func toggleRow(_ row: VexxRow, store: PatchProjectStore) {
         guard busyID == nil else { return }
-        busyID = item.id
+        busyID = UUID()
         error = nil
-        let isOn = active.contains(item.id)
+
         Task.detached(priority: .userInitiated) {
             do {
-                if isOn {
-                    try Self.restoreOne(item)
+                let already = await MainActor.run {
+                    VexxMatch.item(for: row, in: store.items)
+                }
+
+                if let existing = already,
+                   await MainActor.run(body: { self.active.contains(existing.id) }) {
+                    try Self.restoreOne(existing)
                     await MainActor.run {
-                        _ = self.active.remove(item.id)
+                        _ = self.active.remove(existing.id)
                         self.busyID = nil
                         VexxVoice.play(.off)
                     }
-                } else {
-                    try Self.applyOne(item)
-                    await MainActor.run {
-                        self.active.insert(item.id)
-                        self.busyID = nil
-                        VexxVoice.play(.on)
+                    return
+                }
+
+                if row.tab == .aimbots {
+                    let others = await MainActor.run {
+                        VexxCatalog.rows
+                            .filter { $0.tab == .aimbots && $0.id != row.id }
+                            .compactMap { VexxMatch.item(for: $0, in: store.items) }
+                            .filter { self.active.contains($0.id) }
                     }
+                    for other in others {
+                        try? Self.restoreOne(other)
+                        await MainActor.run { _ = self.active.remove(other.id) }
+                    }
+                }
+
+                var target = await MainActor.run {
+                    VexxMatch.item(for: row, in: store.items)
+                }
+
+                if target == nil {
+                    try await Self.importBundled(row: row, store: store)
+                    target = await MainActor.run {
+                        VexxMatch.item(for: row, in: store.items)
+                    }
+                }
+
+                guard let item = target else { throw VexxError.notBundled }
+
+                try Self.applyOne(item)
+                await MainActor.run {
+                    self.active.insert(item.id)
+                    self.busyID = nil
+                    VexxVoice.play(.on)
                 }
             } catch {
                 await MainActor.run {
@@ -179,6 +240,31 @@ final class VexxEngine: ObservableObject {
                 }
             }
         }
+    }
+
+    private nonisolated static func importBundled(
+        row: VexxRow,
+        store: PatchProjectStore
+    ) async throws {
+        let base = row.file.replacingOccurrences(of: ".3105", with: "")
+        guard let url = Bundle.main.url(forResource: row.file, withExtension: nil)
+            ?? Bundle.main.url(forResource: base, withExtension: "3105"),
+              let data = try? Data(contentsOf: url) else {
+            throw VexxError.notBundled
+        }
+
+        await MainActor.run {
+            _ = store.importPackage(data: data, password: VexxCatalog.password)
+        }
+
+        for _ in 0..<24 {
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            let done = await MainActor.run {
+                !store.isBusy && VexxMatch.item(for: row, in: store.items) != nil
+            }
+            if done { return }
+        }
+        throw VexxError.importFailed
     }
 
     private nonisolated static func applyOne(_ item: PatchLibraryItem) throws {
@@ -531,44 +617,10 @@ struct VexxMain: View {
             .sheet(isPresented: $showSettings) {
                 VexxSettings(engine: engine, license: license)
             }
-            .task {
+            .task(id: engine.retryToken) {
                 engine.refresh(store.items)
-                await seedBundledPatches()
             }
         }
-    }
-
-    private func seedBundledPatches() async {
-        let urls = Bundle.main.urls(forResourcesWithExtension: "3105", subdirectory: nil) ?? []
-        for url in urls {
-            let name = url.deletingPathExtension().lastPathComponent.lowercased()
-            let exists = store.items.contains { item in
-                let f = item.packageURL.deletingPathExtension().lastPathComponent.lowercased()
-                let n = (item.project?.name ?? "").lowercased()
-                return f == name || n == name
-                    || (!f.isEmpty && f.hasPrefix(name))
-                    || (!n.isEmpty && n.hasPrefix(name))
-            }
-            guard !exists else { continue }
-            while store.isBusy { try? await Task.sleep(nanoseconds: 300_000_000) }
-            if let data = try? Data(contentsOf: url) {
-                _ = store.importPackage(data: data, password: VexxCatalog.password)
-            } else {
-                engine.seedLog.append("\(name): no se pudo leer")
-                continue
-            }
-            try? await Task.sleep(nanoseconds: 700_000_000)
-            if let alert = store.alert {
-                engine.seedLog.append("\(name) → \(alert.messageKey) \(alert.messageArgument ?? "")")
-                store.alert = nil
-            }
-            if let unlock = store.unlockErrorKey {
-                engine.seedLog.append("\(name) → unlock \(unlock)")
-                store.clearUnlockError()
-            }
-        }
-        while store.isBusy { try? await Task.sleep(nanoseconds: 300_000_000) }
-        engine.refresh(store.items)
     }
 
     private func openFF() {
@@ -584,34 +636,13 @@ struct VexxMain: View {
 }
 
 struct VexxSwitchRow: View {
+    @EnvironmentObject private var store: PatchProjectStore
     let row: VexxRow
     @ObservedObject var engine: VexxEngine
     let items: [PatchLibraryItem]
 
     private var item: PatchLibraryItem? {
-        let key = row.file
-            .replacingOccurrences(of: ".3105", with: "")
-            .lowercased()
-
-        func tokens(_ i: PatchLibraryItem) -> [String] {
-            [
-                i.packageURL.lastPathComponent.lowercased(),
-                i.packageURL.deletingPathExtension().lastPathComponent.lowercased(),
-                (i.project?.name ?? "").lowercased()
-            ].filter { !$0.isEmpty }
-        }
-
-        let mine = [row.file.lowercased(), key]
-
-        if let exact = items.first(where: { i in
-            tokens(i).contains { t in mine.contains(t) }
-        }) {
-            return exact
-        }
-
-        return items.first(where: { i in
-            tokens(i).contains { t in mine.contains { m in t.contains(m) || m.contains(t) } }
-        })
+        VexxMatch.item(for: row, in: items)
     }
 
     private var isOn: Bool {
@@ -621,7 +652,7 @@ struct VexxSwitchRow: View {
     var body: some View {
         Toggle(isOn: Binding(
             get: { isOn },
-            set: { _ in if let item { engine.toggle(item) } }
+            set: { _ in engine.toggleRow(row, store: store) }
         )) {
             HStack(spacing: 11) {
                 Circle()
@@ -632,16 +663,14 @@ struct VexxSwitchRow: View {
                     Text(row.title)
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.white)
-                    if item == nil {
-                        Text("parche no encontrado")
-                            .font(.caption2)
-                            .foregroundStyle(.orange)
-                    }
+                    Text(isOn ? "activado" : "desactivado")
+                        .font(.caption2)
+                        .foregroundStyle(isOn ? VexxTheme.on : .white.opacity(0.35))
                 }
             }
         }
         .tint(isOn ? VexxTheme.on : VexxTheme.off)
-        .disabled(item == nil || engine.busyID != nil)
+        .disabled(engine.busyID != nil)
         .listRowBackground(
             RoundedRectangle(cornerRadius: 14)
                 .fill(isOn ? VexxTheme.on.opacity(0.12) : VexxTheme.card)
@@ -700,6 +729,7 @@ struct VexxSettings: View {
                             .font(.caption2.monospaced())
                             .foregroundStyle(.secondary)
                     }
+                    Button("Refrescar") { engine.refresh(store.items) }
                 } header: {
                     Text("Depuración")
                 }
@@ -712,7 +742,7 @@ struct VexxSettings: View {
                                 .foregroundStyle(.orange)
                         }
                     } header: {
-                        Text("Errores de importado")
+                        Text("Errores")
                     }
                 }
 
