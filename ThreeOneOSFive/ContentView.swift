@@ -165,24 +165,6 @@ final class VexxEngine: ObservableObject {
         }
     }
 
-    func restoreAll(_ items: [PatchLibraryItem]) {
-        guard busyID == nil else { return }
-        let targets = items.filter { active.contains($0.id) }
-        guard !targets.isEmpty else { return }
-        busyID = targets.first?.id
-        Task.detached(priority: .userInitiated) {
-            for item in targets {
-                do {
-                    try Self.restoreOne(item)
-                    await MainActor.run { _ = self.active.remove(item.id) }
-                } catch {
-                    await MainActor.run { self.error = "\(error)" }
-                }
-            }
-            await MainActor.run { self.busyID = nil }
-        }
-    }
-
     private nonisolated static func applyOne(_ item: PatchLibraryItem) throws {
         guard let base = item.project else { return }
         let project = item.summary.schemaVersion >= 2 && item.canInspectContents
@@ -518,18 +500,21 @@ struct VexxMain: View {
                 }
             }
             .sheet(isPresented: $showSettings) {
-                VexxSettings(engine: engine, license: license)
+                VexxSettings(license: license)
             }
             .task { engine.refresh(store.items) }
         }
     }
 
     private func openFF() {
-        for s in ["freefire://", "freefiremax://"] {
-            if let u = URL(string: s), UIApplication.shared.canOpenURL(u) {
-                UIApplication.shared.open(u); return
+        let schemes = ["freefire://", "freefiremax://"]
+        func attempt(_ index: Int) {
+            guard index < schemes.count, let url = URL(string: schemes[index]) else { return }
+            UIApplication.shared.open(url, options: [:]) { ok in
+                if !ok { attempt(index + 1) }
             }
         }
+        attempt(0)
     }
 }
 
@@ -583,11 +568,8 @@ struct VexxSwitchRow: View {
 }
 
 struct VexxSettings: View {
-    @EnvironmentObject private var store: PatchProjectStore
-    @ObservedObject var engine: VexxEngine
     @ObservedObject var license: VexxLicense
     @Environment(\.dismiss) private var dismiss
-    @State private var confirmRestore = false
     @State private var copied = false
 
     var body: some View {
@@ -622,18 +604,6 @@ struct VexxSettings: View {
                 }
 
                 Section {
-                    Button("Restaurar todo") { confirmRestore = true }
-                        .disabled(engine.busyID != nil)
-                    if let e = engine.error {
-                        Text(e).font(.caption2).foregroundStyle(.red)
-                    }
-                } header: {
-                    Text("Parches")
-                } footer: {
-                    Text("Desactiva todos los parches activos.")
-                }
-
-                Section {
                     Link("t.me/levibrouh", destination: URL(string: "https://t.me/levibrouh")!)
                     Link("t.me/levibrouhs", destination: URL(string: "https://t.me/levibrouhs")!)
                 } header: {
@@ -643,13 +613,6 @@ struct VexxSettings: View {
             .navigationTitle("Ajustes")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { Button("Listo") { dismiss() } }
-            .confirmationDialog(
-                "¿Restaurar todos los parches?",
-                isPresented: $confirmRestore,
-                titleVisibility: .visible
-            ) {
-                Button("Restaurar", role: .destructive) { engine.restoreAll(store.items) }
-            }
         }
     }
 }
