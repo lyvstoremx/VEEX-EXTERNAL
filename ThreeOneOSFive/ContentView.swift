@@ -120,7 +120,7 @@ enum VexxCatalog {
     static let rows: [VexxRow] = [
         .init(id: "antena",  title: "Aim Drag Antena",       file: "aim_drag_antena.3105",  tab: .aimbots),
         .init(id: "drag",    title: "Aim Drag",              file: "aim_drag.3105",         tab: .aimbots),
-        .init(id: "pecho",   title: "Aim Pecho",             file: "iam_pecho.3105",        tab: .aimbots),
+        .init(id: "pecho",   title: "Aim Pecho",             file: "aim_pecho.3105",        tab: .aimbots),
         .init(id: "balas",   title: "Balas Mágicas",         file: "balas_magicas.3105",    tab: .aimbots),
         .init(id: "holoarm", title: "Hologramas Armas",      file: "holo_armas.3105",       tab: .holograms),
         .init(id: "holoper", title: "Hologramas Personajes", file: "holo_personaje.3105",   tab: .holograms),
@@ -621,7 +621,7 @@ struct VexxSettings: View {
                         license.signOut()
                         dismiss()
                     } label: {
-                        Label("Borrar key", systemImage: "trash.fill")
+                        Label("Trash", systemImage: "trash.fill")
                     }
                 } header: {
                     Text("Tu key")
