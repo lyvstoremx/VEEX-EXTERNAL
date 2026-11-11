@@ -43,7 +43,7 @@ struct VexxPatch: Identifiable {
 enum VexxCatalog {
     static let password = "Levi-externas-veex-6393*#%"
     static let all: [VexxPatch] = [
-        .init(id: "aim_drag", title: "Aim Drag Antena", pkg: "aim_drag_antena", group: .aim),
+        .init(id: "aim_drag", title: "Aim Drag Antena", pkg: "aim_drag", group: .aim),
         .init(id: "aim_pecho", title: "Aim Pecho", pkg: "aim_pecho", group: .aim),
         .init(id: "balas", title: "Balas Mágicas", pkg: "balas_magicas", group: .aim),
         .init(id: "holo_arma", title: "Hologramas Armas", pkg: "holo_arma", group: .holo),
@@ -333,12 +333,12 @@ struct VexxMain: View {
             VStack(spacing: 0) {
                 header
                 if let error {
-                    HStack(spacing: 8) {
+                    HStack(alignment: .top, spacing: 8) {
                         Image(systemName: "exclamationmark.triangle.fill")
                             .font(.system(size: 11))
                         Text(error)
                             .font(.system(size: 11, weight: .medium))
-                            .lineLimit(3)
+                            .lineLimit(8)
                         Spacer(minLength: 0)
                     }
                     .foregroundStyle(.red)
@@ -481,27 +481,51 @@ struct VexxMain: View {
         UserDefaults.standard.set(id.uuidString, forKey: cacheKey(p))
     }
 
+    private func score(_ name: String, _ p: VexxPatch) -> Int {
+        let n = VexxCatalog.norm(name)
+        guard !n.isEmpty else { return 0 }
+        let keys = [VexxCatalog.norm(p.pkg), VexxCatalog.norm(p.title)]
+        var best = 0
+        for (i, k) in keys.enumerated() where !k.isEmpty {
+            let w = i == 0 ? 10 : 6
+            if n == k {
+                best = max(best, 100 * w)
+            } else if n.hasPrefix(k) || k.hasPrefix(n) {
+                best = max(best, 70 * w)
+            } else if n.contains(k) || k.contains(n) {
+                best = max(best, 50 * w)
+            }
+        }
+        return best
+    }
+
     private func availablePackages() -> [URL] {
         let fm = FileManager.default
         let root = Bundle.main.bundleURL
-        var found: [URL] = []
+        var raw: [URL] = []
         for dir in [root, root.appendingPathComponent("Frameworks")] {
             if let list = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) {
-                found += list.filter { $0.pathExtension.lowercased() == "3105" }
+                raw += list.filter { $0.pathExtension.lowercased() == "3105" }
             }
         }
         if let extra = Bundle.main.urls(forResourcesWithExtension: "3105", subdirectory: nil) {
-            found += extra
+            raw += extra
         }
-        return found
+        var seen = Set<String>()
+        var out: [URL] = []
+        for url in raw where seen.insert(url.lastPathComponent.lowercased()).inserted {
+            out.append(url)
+        }
+        return out
     }
 
     private func packageURL(_ p: VexxPatch) -> URL? {
-        if let direct = Bundle.main.url(forResource: p.pkg, withExtension: "3105") { return direct }
-        let key = VexxCatalog.norm(p.pkg)
-        return availablePackages().first {
-            VexxCatalog.norm($0.deletingPathExtension().lastPathComponent) == key
+        var best: (URL, Int)?
+        for url in availablePackages() {
+            let s = score(url.deletingPathExtension().lastPathComponent, p)
+            if s > 0, s > (best?.1 ?? 0) { best = (url, s) }
         }
+        return best?.0
     }
 
     private func findItem(_ p: VexxPatch) -> PatchLibraryItem? {
@@ -510,11 +534,12 @@ struct VexxMain: View {
            let hit = store.items.first(where: { $0.id == id }) {
             return hit
         }
-        let wanted = Set([VexxCatalog.norm(p.pkg), VexxCatalog.norm(p.title)])
-        if let hit = store.items.first(where: {
-            let n = VexxCatalog.norm($0.project?.name ?? "")
-            return !n.isEmpty && wanted.contains(n)
-        }) {
+        var best: (PatchLibraryItem, Int)?
+        for item in store.items {
+            let s = score(item.project?.name ?? "", p)
+            if s >= 500, s > (best?.1 ?? 0) { best = (item, s) }
+        }
+        if let hit = best?.0 {
             cache(hit.id, p)
             return hit
         }
@@ -567,8 +592,22 @@ struct VexxMain: View {
             }
             sync()
         }
-        let item = try await importPackage(p)
-        try await applyItem(item)
+        do {
+            let item = try await importPackage(p)
+            try await applyItem(item)
+        } catch {
+            let msg = String(describing: error).lowercased()
+            guard p.group == .aim, msg.contains("occupied") || msg.contains("bloqueado") else { throw error }
+            var freed: [VexxPatch] = []
+            for other in VexxCatalog.all where other.id != p.id && on.contains(other.id) {
+                try? await turnOff(other)
+                freed.append(other)
+            }
+            sync()
+            let item = try await importPackage(p)
+            try await applyItem(item)
+            for other in freed { try? await turnOn(other) }
+        }
     }
 
     private func turnOff(_ p: VexxPatch) async throws {
@@ -597,7 +636,7 @@ struct VexxMain: View {
         guard let url = packageURL(p) else {
             let names = availablePackages().map { $0.lastPathComponent }.sorted()
             throw VexxError.message(
-                "falta \(p.pkg).3105 · ipa: \(names.isEmpty ? "vacío" : names.joined(separator: ", "))"
+                "falta \(p.pkg).3105 · ipa: \(names.isEmpty ? "vacío" : names.joined(separator: " | "))"
             )
         }
         let data = try Data(contentsOf: url)
