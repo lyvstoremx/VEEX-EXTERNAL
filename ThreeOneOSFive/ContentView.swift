@@ -546,9 +546,29 @@ struct VexxSwitchRow: View {
     let items: [PatchLibraryItem]
 
     private var item: PatchLibraryItem? {
-        items.first {
-            $0.packageURL.lastPathComponent.lowercased() == row.file.lowercased()
+        let key = row.file
+            .replacingOccurrences(of: ".3105", with: "")
+            .lowercased()
+
+        func tokens(_ i: PatchLibraryItem) -> [String] {
+            [
+                i.packageURL.lastPathComponent.lowercased(),
+                i.packageURL.deletingPathExtension().lastPathComponent.lowercased(),
+                (i.project?.name ?? "").lowercased()
+            ].filter { !$0.isEmpty }
         }
+
+        let mine = [row.file.lowercased(), key]
+
+        if let exact = items.first(where: { i in
+            tokens(i).contains { t in mine.contains(t) }
+        }) {
+            return exact
+        }
+
+        return items.first(where: { i in
+            tokens(i).contains { t in mine.contains { m in t.contains(m) || m.contains(t) } }
+        })
     }
 
     private var isOn: Bool {
