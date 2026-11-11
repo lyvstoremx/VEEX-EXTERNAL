@@ -575,7 +575,7 @@ struct VexxSwitchRow: View {
                 .fill(isOn ? VexxTheme.on.opacity(0.12) : VexxTheme.card)
                 .overlay(
                     RoundedRectangle(cornerRadius: 14)
-                        .stroke(isOn ? VexxTheme.on.opacity(0.4) : .clear, lineWidth: 1)
+                        .stroke(isOn ? VexxTheme.on.opacity(0.4) : Color.clear, lineWidth: 1)
                 )
         )
         .animation(VexxTheme.spring, value: isOn)
@@ -598,7 +598,7 @@ struct VexxSettings: View {
                         Label("Tiempo", systemImage: "clock.fill")
                         Spacer()
                         Text(license.remainingText)
-                            .foregroundStyle(license.expiry == nil ? VexxTheme.on : .secondary)
+                            .foregroundStyle(license.expiry == nil ? VexxTheme.on : Color.secondary)
                     }
                     HStack {
                         Label("Dispositivos", systemImage: "iphone")
