@@ -48,8 +48,12 @@ enum VexxCatalog {
         .init(id: "balas", title: "Balas Mágicas", pkg: "balas_magicas", group: .aim),
         .init(id: "holo_arma", title: "Hologramas Armas", pkg: "holo_arma", group: .holo),
         .init(id: "holo_pers", title: "Hologramas Personajes", pkg: "holo_personaje", group: .holo),
-        .init(id: "reset", title: "Borrar Invitado", pkg: "reset_guest", group: .reset)
+        .init(id: "reset", title: "Borrar Invitado", pkg: "Reset Guest", group: .reset)
     ]
+
+    static func norm(_ s: String) -> String {
+        s.lowercased().filter { $0.isLetter || $0.isNumber }
+    }
 }
 
 // MARK: - Licencia
@@ -66,7 +70,11 @@ final class VexxLicense: ObservableObject {
     @Published var expiry: Date?
     @Published var message: String?
 
-    init() { if let saved = UserDefaults.standard.string(forKey: Self.kKey) { _ = activate(saved, silent: true) } }
+    init() {
+        if let saved = UserDefaults.standard.string(forKey: Self.kKey) {
+            _ = activate(saved, silent: true)
+        }
+    }
 
     var idfv: String { UIDevice.current.identifierForVendor?.uuidString ?? "sin-id" }
 
@@ -77,7 +85,8 @@ final class VexxLicense: ObservableObject {
 
     private static func b32(_ bytes: [UInt8]) -> String {
         var out = ""
-        var buffer = 0, bits = 0
+        var buffer = 0
+        var bits = 0
         for b in bytes {
             buffer = (buffer << 8) | Int(b)
             bits += 8
@@ -92,7 +101,8 @@ final class VexxLicense: ObservableObject {
 
     private static func unb32(_ s: String) -> [UInt8]? {
         var out: [UInt8] = []
-        var buffer = 0, bits = 0
+        var buffer = 0
+        var bits = 0
         for ch in s.uppercased() {
             guard let i = alpha.firstIndex(of: ch) else { return nil }
             buffer = (buffer << 5) | i
@@ -107,32 +117,43 @@ final class VexxLicense: ObservableObject {
 
     @discardableResult
     func activate(_ raw: String, silent: Bool = false) -> Bool {
-        let key = raw.uppercased().replacingOccurrences(of: " ", with: "")
+        let key = raw.uppercased()
+            .replacingOccurrences(of: " ", with: "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         message = nil
 
         if Self.masters.contains(key) {
-            master = true; valid = true; expiry = nil
+            master = true
+            valid = true
+            expiry = nil
             UserDefaults.standard.set(key, forKey: Self.kKey)
             return true
         }
 
         let parts = key.split(separator: "-")
-        guard parts.count == 3, parts[0] == "VEEX",
+        guard parts.count == 3,
+              parts[0] == "VEEX",
               let payload = Self.unb32(String(parts[1])), payload.count == 7,
               let sig = Self.unb32(String(parts[2])), sig.count >= 5 else {
             if !silent { message = "key inválida" }
             return false
         }
 
-        let mac = HMAC<SHA256>.authenticationCode(for: Data(payload), using: SymmetricKey(data: Data(Self.secret.utf8)))
+        let mac = HMAC<SHA256>.authenticationCode(
+            for: Data(payload),
+            using: SymmetricKey(data: Data(Self.secret.utf8))
+        )
         guard Array(mac).prefix(5).elementsEqual(sig.prefix(5)) else {
             if !silent { message = "key inválida" }
             return false
         }
 
         let days = Int(payload[0]) << 8 | Int(payload[1])
-        let date = Calendar.current.date(byAdding: .day, value: days, to: Date(timeIntervalSince1970: 1_577_836_800)) ?? Date()
+        let date = Calendar.current.date(
+            byAdding: .day,
+            value: days,
+            to: Date(timeIntervalSince1970: 1_577_836_800)
+        ) ?? Date()
         guard date > Date() else {
             if !silent { message = "key vencida" }
             return false
@@ -150,17 +171,22 @@ final class VexxLicense: ObservableObject {
                 if !silent { message = "key en uso en otro dispositivo" }
                 return false
             }
-            list.append(idfv); devs[key] = list
+            list.append(idfv)
+            devs[key] = list
             UserDefaults.standard.set(devs, forKey: Self.kDev)
         }
 
-        master = false; valid = true; expiry = date
+        master = false
+        valid = true
+        expiry = date
         UserDefaults.standard.set(key, forKey: Self.kKey)
         return true
     }
 
     func forget() {
-        valid = false; master = false; expiry = nil
+        valid = false
+        master = false
+        expiry = nil
         UserDefaults.standard.removeObject(forKey: Self.kKey)
     }
 
@@ -173,7 +199,8 @@ final class VexxLicense: ObservableObject {
 
     var devices: Int {
         let devs = UserDefaults.standard.dictionary(forKey: Self.kDev) as? [String: [String]] ?? [:]
-        return (devs[UserDefaults.standard.string(forKey: Self.kKey) ?? ""] ?? []).count
+        let key = UserDefaults.standard.string(forKey: Self.kKey) ?? ""
+        return (devs[key] ?? []).count
     }
 }
 
@@ -220,7 +247,9 @@ struct VexxGate: View {
                     .opacity(appeared ? 1 : 0)
 
                 HStack(spacing: 7) {
-                    Circle().fill(VexxSupport.isSupported ? .green : .red).frame(width: 8, height: 8)
+                    Circle()
+                        .fill(VexxSupport.isSupported ? .green : .red)
+                        .frame(width: 8, height: 8)
                     Text(VexxSupport.isSupported ? "Soportado" : "No soportado")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(VexxSupport.isSupported ? .green : .red)
@@ -237,7 +266,9 @@ struct VexxGate: View {
                         .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 14))
 
                     if let m = license.message {
-                        Text(m).font(.system(size: 12, weight: .medium)).foregroundStyle(.red)
+                        Text(m)
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(.red)
                     }
 
                     Button {
@@ -258,7 +289,9 @@ struct VexxGate: View {
                 Spacer()
 
                 VStack(spacing: 8) {
-                    Text("Levi").font(.system(size: 12, weight: .bold)).foregroundStyle(.white.opacity(0.5))
+                    Text("Levi")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(.white.opacity(0.5))
                     HStack(spacing: 16) {
                         Link("Canal", destination: URL(string: "https://t.me/levibrouhs")!)
                         Link("Telegram", destination: URL(string: "https://t.me/levibrouh")!)
@@ -301,12 +334,16 @@ struct VexxMain: View {
                 header
                 if let error {
                     HStack(spacing: 8) {
-                        Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 11))
-                        Text(error).font(.system(size: 11, weight: .medium)).lineLimit(2)
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 11))
+                        Text(error)
+                            .font(.system(size: 11, weight: .medium))
+                            .lineLimit(3)
                         Spacer(minLength: 0)
                     }
                     .foregroundStyle(.red)
-                    .padding(.horizontal, 16).padding(.vertical, 8)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
                     .background(Color.red.opacity(0.12))
                     .transition(.move(edge: .top).combined(with: .opacity))
                 }
@@ -328,10 +365,13 @@ struct VexxMain: View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
                 Text("VEEX EXTERNAL")
-                    .font(.system(size: 17, weight: .black)).tracking(1)
+                    .font(.system(size: 17, weight: .black))
+                    .tracking(1)
                     .foregroundStyle(.white)
                 HStack(spacing: 5) {
-                    Circle().fill(VexxSupport.isSupported ? .green : .red).frame(width: 6, height: 6)
+                    Circle()
+                        .fill(VexxSupport.isSupported ? .green : .red)
+                        .frame(width: 6, height: 6)
                     Text(VexxSupport.isSupported ? "Soportado" : "No soportado")
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(VexxSupport.isSupported ? .green : .red)
@@ -339,10 +379,14 @@ struct VexxMain: View {
             }
             Spacer()
             Button { showSettings = true } label: {
-                Image(systemName: "gearshape.fill").font(.system(size: 17)).foregroundStyle(.white.opacity(0.85))
+                Image(systemName: "gearshape.fill")
+                    .font(.system(size: 17))
+                    .foregroundStyle(.white.opacity(0.85))
             }
         }
-        .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 12)
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .padding(.bottom, 12)
     }
 
     private var tabs: some View {
@@ -361,7 +405,8 @@ struct VexxMain: View {
                 .buttonStyle(.plain)
             }
         }
-        .padding(.horizontal, 16).padding(.bottom, 12)
+        .padding(.horizontal, 16)
+        .padding(.bottom, 12)
     }
 
     private func rowView(_ p: VexxPatch) -> some View {
@@ -369,7 +414,9 @@ struct VexxMain: View {
         let working = busy == p.id
         return HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
-                Text(p.title).font(.system(size: 14, weight: .semibold)).foregroundStyle(.white)
+                Text(p.title)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.white)
                 Text(active ? "Activado" : "Desactivado")
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(active ? .green : .white.opacity(0.4))
@@ -382,12 +429,16 @@ struct VexxMain: View {
                     .fill(active ? Color.green : Color.red)
                     .frame(width: 46, height: 26)
                     .overlay(alignment: active ? .trailing : .leading) {
-                        Circle().fill(.white).frame(width: 20, height: 20).padding(3)
+                        Circle()
+                            .fill(.white)
+                            .frame(width: 20, height: 20)
+                            .padding(3)
                     }
                     .animation(.snappy, value: active)
             }
         }
-        .padding(.horizontal, 14).padding(.vertical, 12)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
         .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
         .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.06)))
         .contentShape(Rectangle())
@@ -403,14 +454,18 @@ struct VexxMain: View {
                     Image(systemName: "gamecontroller.fill").font(.system(size: 12))
                     Text("Abrir Free Fire").font(.system(size: 13, weight: .bold))
                 }
-                .frame(maxWidth: .infinity).padding(.vertical, 12)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
                 .background(Color.white, in: RoundedRectangle(cornerRadius: 13))
                 .foregroundStyle(.black)
             }
             .buttonStyle(.plain)
+
             Button { sync() } label: {
-                Image(systemName: "arrow.clockwise").font(.system(size: 14, weight: .bold))
-                    .padding(.vertical, 12).padding(.horizontal, 16)
+                Image(systemName: "arrow.clockwise")
+                    .font(.system(size: 14, weight: .bold))
+                    .padding(.vertical, 12)
+                    .padding(.horizontal, 16)
                     .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 13))
                     .foregroundStyle(.white)
             }
@@ -426,12 +481,39 @@ struct VexxMain: View {
         UserDefaults.standard.set(id.uuidString, forKey: cacheKey(p))
     }
 
+    private func availablePackages() -> [URL] {
+        let fm = FileManager.default
+        let root = Bundle.main.bundleURL
+        var found: [URL] = []
+        for dir in [root, root.appendingPathComponent("Frameworks")] {
+            if let list = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) {
+                found += list.filter { $0.pathExtension.lowercased() == "3105" }
+            }
+        }
+        if let extra = Bundle.main.urls(forResourcesWithExtension: "3105", subdirectory: nil) {
+            found += extra
+        }
+        return found
+    }
+
+    private func packageURL(_ p: VexxPatch) -> URL? {
+        if let direct = Bundle.main.url(forResource: p.pkg, withExtension: "3105") { return direct }
+        let key = VexxCatalog.norm(p.pkg)
+        return availablePackages().first {
+            VexxCatalog.norm($0.deletingPathExtension().lastPathComponent) == key
+        }
+    }
+
     private func findItem(_ p: VexxPatch) -> PatchLibraryItem? {
         if let raw = UserDefaults.standard.string(forKey: cacheKey(p)),
            let id = UUID(uuidString: raw),
-           let hit = store.items.first(where: { $0.id == id }) { return hit }
+           let hit = store.items.first(where: { $0.id == id }) {
+            return hit
+        }
+        let wanted = Set([VexxCatalog.norm(p.pkg), VexxCatalog.norm(p.title)])
         if let hit = store.items.first(where: {
-            ($0.project?.name ?? "").lowercased() == p.pkg.lowercased()
+            let n = VexxCatalog.norm($0.project?.name ?? "")
+            return !n.isEmpty && wanted.contains(n)
         }) {
             cache(hit.id, p)
             return hit
@@ -464,7 +546,11 @@ struct VexxMain: View {
         let turningOn = !on.contains(p.id)
         Task {
             do {
-                if turningOn { try await turnOn(p) } else { try await turnOff(p) }
+                if turningOn {
+                    try await turnOn(p)
+                } else {
+                    try await turnOff(p)
+                }
                 VexxAudio.shared.play(turningOn ? "on" : "off")
             } catch {
                 self.error = "\(p.title): \(String(describing: error))"
@@ -508,8 +594,11 @@ struct VexxMain: View {
 
     private func importPackage(_ p: VexxPatch) async throws -> PatchLibraryItem {
         if let existing = findItem(p) { return existing }
-        guard let url = Bundle.main.url(forResource: p.pkg, withExtension: "3105") else {
-            throw VexxError.message("falta \(p.pkg).3105 en el ipa")
+        guard let url = packageURL(p) else {
+            let names = availablePackages().map { $0.lastPathComponent }.sorted()
+            throw VexxError.message(
+                "falta \(p.pkg).3105 · ipa: \(names.isEmpty ? "vacío" : names.joined(separator: ", "))"
+            )
         }
         let data = try Data(contentsOf: url)
 
@@ -577,13 +666,19 @@ struct VexxSettings: View {
                         LabeledContent("Dispositivos") {
                             Text(license.master ? "Ilimitados" : "\(license.devices)")
                         }
-                        LabeledContent("iOS") { Text(ProcessInfo.processInfo.operatingSystemVersionString) }
-                    } header: { Text("Licencia") }
+                        LabeledContent("iOS") {
+                            Text(ProcessInfo.processInfo.operatingSystemVersionString)
+                        }
+                    } header: {
+                        Text("Licencia")
+                    }
 
                     Section {
                         Link("Telegram", destination: URL(string: "https://t.me/levibrouh")!)
                         Link("Canal", destination: URL(string: "https://t.me/levibrouhs")!)
-                    } header: { Text("Levi") }
+                    } header: {
+                        Text("Levi")
+                    }
 
                     Section {
                         Button("Borrar key", role: .destructive) {
