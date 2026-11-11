@@ -31,29 +31,37 @@ final class VexxAudio {
 }
 
 // MARK: - Catálogo
-enum VexxGroup { case aim, holo, reset }
+enum VexxTab: String, CaseIterable, Identifiable {
+    case aimbots = "Aimbots"
+    case holograms = "Hologramas"
+    case guest = "Borrar Invitado"
+    var id: String { rawValue }
+}
 
-struct VexxPatch: Identifiable {
+struct VexxRow: Identifiable {
     let id: String
     let title: String
     let pkg: String
-    let group: VexxGroup
+    let tab: VexxTab
 }
 
 enum VexxCatalog {
     static let password = "Levi-externas-veex-6393*#%"
-    static let all: [VexxPatch] = [
-        .init(id: "aim_drag", title: "Aim Drag Antena", pkg: "aim_drag", group: .aim),
-        .init(id: "aim_pecho", title: "Aim Pecho", pkg: "aim_pecho", group: .aim),
-        .init(id: "balas", title: "Balas Mágicas", pkg: "balas_magicas", group: .aim),
-        .init(id: "holo_arma", title: "Hologramas Armas", pkg: "holo_arma", group: .holo),
-        .init(id: "holo_pers", title: "Hologramas Personajes", pkg: "holo_personaje", group: .holo),
-        .init(id: "reset", title: "Borrar Invitado", pkg: "Reset Guest", group: .reset)
+    static let rows: [VexxRow] = [
+        .init(id: "antena",  title: "Aim Drag Antena",       pkg: "aim_drag_antena", tab: .aimbots),
+        .init(id: "drag",    title: "Aim Drag",              pkg: "aim_drag",        tab: .aimbots),
+        .init(id: "pecho",   title: "Aim Pecho",             pkg: "aim_pecho",       tab: .aimbots),
+        .init(id: "balas",   title: "Balas Mágicas",         pkg: "balas_magicas",   tab: .aimbots),
+        .init(id: "holoarm", title: "Hologramas Armas",      pkg: "holo_arma",       tab: .holograms),
+        .init(id: "holoper", title: "Hologramas Personajes", pkg: "holo_personaje",  tab: .holograms),
+        .init(id: "guest",   title: "Reset Guest",           pkg: "Reset Guest",     tab: .guest)
     ]
 
     static func norm(_ s: String) -> String {
         s.lowercased().filter { $0.isLetter || $0.isNumber }
     }
+
+    static var aimbots: [VexxRow] { rows.filter { $0.tab == .aimbots } }
 }
 
 // MARK: - Licencia
@@ -81,22 +89,6 @@ final class VexxLicense: ObservableObject {
     private func tag() -> [UInt8] {
         let h = SHA256.hash(data: Data((idfv + Self.secret).utf8))
         return Array(h).prefix(4).map { $0 }
-    }
-
-    private static func b32(_ bytes: [UInt8]) -> String {
-        var out = ""
-        var buffer = 0
-        var bits = 0
-        for b in bytes {
-            buffer = (buffer << 8) | Int(b)
-            bits += 8
-            while bits >= 5 {
-                out.append(alpha[(buffer >> (bits - 5)) & 31])
-                bits -= 5
-            }
-        }
-        if bits > 0 { out.append(alpha[(buffer << (5 - bits)) & 31]) }
-        return out
     }
 
     private static func unb32(_ s: String) -> [UInt8]? {
@@ -313,23 +305,18 @@ struct VexxMain: View {
     @EnvironmentObject private var store: PatchProjectStore
     @ObservedObject var license: VexxLicense
 
-    @State private var tab = 0
+    @State private var tab: VexxTab = .aimbots
     @State private var on: Set<String> = []
     @State private var busy: String?
     @State private var error: String?
     @State private var showSettings = false
 
-    private var rows: [VexxPatch] {
-        switch tab {
-        case 0: return VexxCatalog.all.filter { $0.group == .aim }
-        case 1: return VexxCatalog.all.filter { $0.group == .holo }
-        default: return VexxCatalog.all.filter { $0.group == .reset }
-        }
+    private var rows: [VexxRow] {
+        VexxCatalog.rows.filter { $0.tab == tab }
     }
 
     var body: some View {
-        ZStack {
-            Color.black.ignoresSafeArea()
+        NavigationStack {
             VStack(spacing: 0) {
                 header
                 if let error {
@@ -347,18 +334,40 @@ struct VexxMain: View {
                     .background(Color.red.opacity(0.12))
                     .transition(.move(edge: .top).combined(with: .opacity))
                 }
-                tabs
-                ScrollView {
-                    VStack(spacing: 10) {
-                        ForEach(rows) { p in rowView(p) }
-                    }
-                    .padding(16)
+
+                Picker("", selection: $tab) {
+                    ForEach(VexxTab.allCases) { Text($0.rawValue).tag($0) }
                 }
-                footer
+                .pickerStyle(.segmented)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 10)
+
+                List {
+                    ForEach(rows) { row in
+                        rowView(row)
+                    }
+                }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+
+                Button { openFF() } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "gamecontroller.fill").font(.system(size: 12))
+                        Text("Abrir Free Fire").font(.system(size: 13, weight: .bold))
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(Color.white, in: RoundedRectangle(cornerRadius: 13))
+                    .foregroundStyle(.black)
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
             }
+            .background(Color.black.ignoresSafeArea())
+            .task { sync() }
+            .sheet(isPresented: $showSettings) { VexxSettings(license: license) }
         }
-        .task { sync() }
-        .sheet(isPresented: $showSettings) { VexxSettings(license: license) }
     }
 
     private var header: some View {
@@ -386,105 +395,44 @@ struct VexxMain: View {
         }
         .padding(.horizontal, 16)
         .padding(.top, 8)
-        .padding(.bottom, 12)
+        .padding(.bottom, 10)
     }
 
-    private var tabs: some View {
-        HStack(spacing: 6) {
-            ForEach(Array(["Aimbots", "Hologramas", "Borrar Invitado"].enumerated()), id: \.offset) { i, t in
-                Button {
-                    withAnimation(.snappy) { tab = i }
-                } label: {
-                    Text(t)
-                        .font(.system(size: 12, weight: .bold))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 9)
-                        .background(tab == i ? Color.white : Color.white.opacity(0.07), in: Capsule())
-                        .foregroundStyle(tab == i ? .black : .white.opacity(0.7))
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.bottom, 12)
-    }
-
-    private func rowView(_ p: VexxPatch) -> some View {
-        let active = on.contains(p.id)
-        let working = busy == p.id
+    private func rowView(_ row: VexxRow) -> some View {
+        let active = on.contains(row.id)
+        let working = busy == row.id
         return HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(p.title)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.white)
-                Text(active ? "Activado" : "Desactivado")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(active ? .green : .white.opacity(0.4))
-            }
+            Text(row.title)
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(.white)
             Spacer()
             if working {
                 ProgressView().tint(.white).scaleEffect(0.8)
             } else {
-                Capsule()
-                    .fill(active ? Color.green : Color.red)
-                    .frame(width: 46, height: 26)
-                    .overlay(alignment: active ? .trailing : .leading) {
-                        Circle()
-                            .fill(.white)
-                            .frame(width: 20, height: 20)
-                            .padding(3)
-                    }
-                    .animation(.snappy, value: active)
+                Toggle("", isOn: Binding(
+                    get: { active },
+                    set: { _ in toggle(row) }
+                ))
+                .labelsHidden()
+                .tint(active ? .green : .red)
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
-        .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.06)))
-        .contentShape(Rectangle())
-        .onTapGesture { toggle(p) }
-        .scaleEffect(working ? 0.98 : 1)
-        .animation(.snappy, value: working)
-    }
-
-    private var footer: some View {
-        HStack(spacing: 10) {
-            Button { openFF() } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "gamecontroller.fill").font(.system(size: 12))
-                    Text("Abrir Free Fire").font(.system(size: 13, weight: .bold))
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 12)
-                .background(Color.white, in: RoundedRectangle(cornerRadius: 13))
-                .foregroundStyle(.black)
-            }
-            .buttonStyle(.plain)
-
-            Button { sync() } label: {
-                Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 14, weight: .bold))
-                    .padding(.vertical, 12)
-                    .padding(.horizontal, 16)
-                    .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 13))
-                    .foregroundStyle(.white)
-            }
-            .buttonStyle(.plain)
-        }
-        .padding(16)
+        .padding(.vertical, 4)
+        .listRowBackground(Color.white.opacity(0.05))
+        .listRowSeparatorTint(.white.opacity(0.08))
     }
 
     // MARK: Lógica
-    private func cacheKey(_ p: VexxPatch) -> String { "veex.id." + p.id }
+    private func cacheKey(_ r: VexxRow) -> String { "veex.id." + r.id }
 
-    private func cache(_ id: UUID, _ p: VexxPatch) {
-        UserDefaults.standard.set(id.uuidString, forKey: cacheKey(p))
+    private func cache(_ id: UUID, _ r: VexxRow) {
+        UserDefaults.standard.set(id.uuidString, forKey: cacheKey(r))
     }
 
-    private func score(_ name: String, _ p: VexxPatch) -> Int {
+    private func score(_ name: String, _ r: VexxRow) -> Int {
         let n = VexxCatalog.norm(name)
         guard !n.isEmpty else { return 0 }
-        let keys = [VexxCatalog.norm(p.pkg), VexxCatalog.norm(p.title)]
+        let keys = [VexxCatalog.norm(r.pkg), VexxCatalog.norm(r.title)]
         var best = 0
         for (i, k) in keys.enumerated() where !k.isEmpty {
             let w = i == 0 ? 10 : 6
@@ -519,28 +467,28 @@ struct VexxMain: View {
         return out
     }
 
-    private func packageURL(_ p: VexxPatch) -> URL? {
+    private func packageURL(_ r: VexxRow) -> URL? {
         var best: (URL, Int)?
         for url in availablePackages() {
-            let s = score(url.deletingPathExtension().lastPathComponent, p)
+            let s = score(url.deletingPathExtension().lastPathComponent, r)
             if s > 0, s > (best?.1 ?? 0) { best = (url, s) }
         }
         return best?.0
     }
 
-    private func findItem(_ p: VexxPatch) -> PatchLibraryItem? {
-        if let raw = UserDefaults.standard.string(forKey: cacheKey(p)),
+    private func findItem(_ r: VexxRow) -> PatchLibraryItem? {
+        if let raw = UserDefaults.standard.string(forKey: cacheKey(r)),
            let id = UUID(uuidString: raw),
            let hit = store.items.first(where: { $0.id == id }) {
             return hit
         }
         var best: (PatchLibraryItem, Int)?
         for item in store.items {
-            let s = score(item.project?.name ?? "", p)
+            let s = score(item.project?.name ?? "", r)
             if s >= 500, s > (best?.1 ?? 0) { best = (item, s) }
         }
         if let hit = best?.0 {
-            cache(hit.id, p)
+            cache(hit.id, r)
             return hit
         }
         return nil
@@ -548,9 +496,9 @@ struct VexxMain: View {
 
     private func sync() {
         var s = Set<String>()
-        for p in VexxCatalog.all {
-            if let item = findItem(p), DevicePatchService.latestReceipt(projectID: item.id) != nil {
-                s.insert(p.id)
+        for row in VexxCatalog.rows {
+            if let item = findItem(row), DevicePatchService.latestReceipt(projectID: item.id) != nil {
+                s.insert(row.id)
             }
         }
         on = s
@@ -564,55 +512,57 @@ struct VexxMain: View {
         try? await Task.sleep(nanoseconds: 300_000_000)
     }
 
-    private func toggle(_ p: VexxPatch) {
+    private func toggle(_ row: VexxRow) {
         guard busy == nil else { return }
-        busy = p.id
+        busy = row.id
         error = nil
-        let turningOn = !on.contains(p.id)
+        let turningOn = !on.contains(row.id)
         Task {
             do {
                 if turningOn {
-                    try await turnOn(p)
+                    try await turnOn(row)
                 } else {
-                    try await turnOff(p)
+                    try await turnOff(row)
                 }
                 VexxAudio.shared.play(turningOn ? "on" : "off")
             } catch {
-                self.error = "\(p.title): \(String(describing: error))"
+                self.error = "\(row.title): \(String(describing: error))"
             }
             sync()
             busy = nil
         }
     }
 
-    private func turnOn(_ p: VexxPatch) async throws {
-        if p.group == .aim {
-            for other in VexxCatalog.all where other.group == .aim && other.id != p.id {
+    private func turnOn(_ row: VexxRow) async throws {
+        if row.tab == .aimbots {
+            for other in VexxCatalog.aimbots where other.id != row.id {
                 try? await turnOff(other)
             }
             sync()
         }
         do {
-            let item = try await importPackage(p)
+            let item = try await importPackage(row)
             try await applyItem(item)
         } catch {
             let msg = String(describing: error).lowercased()
-            guard p.group == .aim, msg.contains("occupied") || msg.contains("bloqueado") else { throw error }
-            var freed: [VexxPatch] = []
-            for other in VexxCatalog.all where other.id != p.id && on.contains(other.id) {
+            guard row.tab == .aimbots, msg.contains("occupied") || msg.contains("bloqueado") else {
+                throw error
+            }
+            var freed: [VexxRow] = []
+            for other in VexxCatalog.rows where other.id != row.id && on.contains(other.id) {
                 try? await turnOff(other)
                 freed.append(other)
             }
             sync()
-            let item = try await importPackage(p)
+            let item = try await importPackage(row)
             try await applyItem(item)
             for other in freed { try? await turnOn(other) }
         }
     }
 
-    private func turnOff(_ p: VexxPatch) async throws {
-        guard let item = findItem(p) else {
-            on.remove(p.id)
+    private func turnOff(_ row: VexxRow) async throws {
+        guard let item = findItem(row) else {
+            on.remove(row.id)
             return
         }
         if let receipt = DevicePatchService.latestReceipt(projectID: item.id) {
@@ -623,20 +573,20 @@ struct VexxMain: View {
             }.value
             store.reload()
         }
-        if p.group == .aim {
+        if row.tab == .aimbots {
             await waitIdle()
             try? PatchProjectLibrary.delete(item)
             store.reload()
-            UserDefaults.standard.removeObject(forKey: cacheKey(p))
+            UserDefaults.standard.removeObject(forKey: cacheKey(row))
         }
     }
 
-    private func importPackage(_ p: VexxPatch) async throws -> PatchLibraryItem {
-        if let existing = findItem(p) { return existing }
-        guard let url = packageURL(p) else {
+    private func importPackage(_ row: VexxRow) async throws -> PatchLibraryItem {
+        if let existing = findItem(row) { return existing }
+        guard let url = packageURL(row) else {
             let names = availablePackages().map { $0.lastPathComponent }.sorted()
             throw VexxError.message(
-                "falta \(p.pkg).3105 · ipa: \(names.isEmpty ? "vacío" : names.joined(separator: " | "))"
+                "falta \(row.pkg).3105 · ipa: \(names.isEmpty ? "vacío" : names.joined(separator: " | "))"
             )
         }
         let data = try Data(contentsOf: url)
@@ -650,10 +600,10 @@ struct VexxMain: View {
             }
             await waitIdle()
             if let fresh = store.items.first(where: { !before.contains($0.id) }) {
-                cache(fresh.id, p)
+                cache(fresh.id, row)
                 return fresh
             }
-            if let existing = findItem(p) { return existing }
+            if let existing = findItem(row) { return existing }
             try? await Task.sleep(nanoseconds: UInt64(attempt) * 400_000_000)
         }
         throw VexxError.message("import falló")
@@ -694,40 +644,38 @@ struct VexxSettings: View {
 
     var body: some View {
         NavigationStack {
-            ZStack {
-                Color.black.ignoresSafeArea()
-                List {
-                    Section {
-                        LabeledContent("Estado") {
-                            Text(license.master ? "Permanente" : license.remaining)
-                                .foregroundStyle(license.master ? .green : .white)
-                        }
-                        LabeledContent("Dispositivos") {
-                            Text(license.master ? "Ilimitados" : "\(license.devices)")
-                        }
-                        LabeledContent("iOS") {
-                            Text(ProcessInfo.processInfo.operatingSystemVersionString)
-                        }
-                    } header: {
-                        Text("Licencia")
+            List {
+                Section {
+                    LabeledContent("Estado") {
+                        Text(license.master ? "Permanente" : license.remaining)
+                            .foregroundStyle(license.master ? .green : .white)
                     }
-
-                    Section {
-                        Link("Telegram", destination: URL(string: "https://t.me/levibrouh")!)
-                        Link("Canal", destination: URL(string: "https://t.me/levibrouhs")!)
-                    } header: {
-                        Text("Levi")
+                    LabeledContent("Dispositivos") {
+                        Text(license.master ? "Ilimitados" : "\(license.devices)")
                     }
+                    LabeledContent("iOS") {
+                        Text(ProcessInfo.processInfo.operatingSystemVersionString)
+                    }
+                } header: {
+                    Text("Licencia")
+                }
 
-                    Section {
-                        Button("Borrar key", role: .destructive) {
-                            license.forget()
-                            dismiss()
-                        }
+                Section {
+                    Link("Telegram", destination: URL(string: "https://t.me/levibrouh")!)
+                    Link("Canal", destination: URL(string: "https://t.me/levibrouhs")!)
+                } header: {
+                    Text("Levi")
+                }
+
+                Section {
+                    Button("Borrar key", role: .destructive) {
+                        license.forget()
+                        dismiss()
                     }
                 }
-                .scrollContentBackground(.hidden)
             }
+            .scrollContentBackground(.hidden)
+            .background(Color.black.ignoresSafeArea())
             .navigationTitle("Ajustes")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
