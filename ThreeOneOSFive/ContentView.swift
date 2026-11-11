@@ -217,19 +217,28 @@ final class VexxEngine: ObservableObject {
                 }
 
                 if row.tab == .aimbots {
-                    let others = await MainActor.run {
+                    let stale = await MainActor.run {
                         VexxCatalog.rows
                             .filter { $0.tab == .aimbots && $0.id != row.id }
                             .compactMap { map[$0.id] }
-                            .filter { self.active.contains($0.id) }
                     }
-                    for other in others {
-                        try? Self.restoreOne(other)
-                        await MainActor.run { _ = self.active.remove(other.id) }
+                    for other in stale {
+                        if await MainActor.run(body: { self.active.contains(other.id) }) {
+                            try? Self.restoreOne(other)
+                            await MainActor.run { _ = self.active.remove(other.id) }
+                        }
+                        await MainActor.run { store.delete(other) }
+                        try? await Task.sleep(nanoseconds: 350_000_000)
                     }
                 }
 
-                var target = map[row.id]
+                var target: PatchLibraryItem?
+
+                if row.tab == .aimbots {
+                    target = nil
+                } else {
+                    target = map[row.id]
+                }
 
                 if target == nil {
                     try await Self.importBundled(row: row, store: store)
@@ -310,7 +319,7 @@ final class VexxLicense: ObservableObject {
     @Published private(set) var expiry: Date?
     @Published private(set) var storedKey: String = ""
 
-    static let masterKey = "VEEX-LEVI-2004"
+    static let masterKeys = ["VEEX-LEVI-2004", "VEEX-LEVI-FF26"]
     static let ownerID   = "2BC18D89"
     static let secret    = "VEEX-3105-LEVI"
     private let alpha = Array("ABCDEFGHJKLMNPQRSTUVWXYZ23456789")
@@ -347,7 +356,7 @@ final class VexxLicense: ObservableObject {
 
     func activate(_ raw: String) {
         let c = norm(raw)
-        if c == norm(Self.masterKey) {
+        if Self.masterKeys.contains(where: { norm($0) == c }) {
             if Self.ownerID == "REEMPLAZA" || Self.ownerID == Self.deviceID {
                 grant(nil, key: raw.uppercased())
             } else { error = "Esta key es de otro dispositivo" }
