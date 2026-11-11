@@ -24,13 +24,6 @@ struct ThreeOneOSFiveApp: App {
         AppLanguage(rawValue: languageCode) ?? .english
     }
 
-    private func checkForUpdate() {
-        Task {
-            guard let offer = await AppUpdateChecker.check() else { return }
-            await MainActor.run { updateOffer = offer }
-        }
-    }
-
     var body: some Scene {
         WindowGroup {
             ZStack {
@@ -52,7 +45,6 @@ struct ThreeOneOSFiveApp: App {
                             showOnboarding = false
                         }
                         appState.detectSupport()
-                        checkForUpdate()
                     }
                     .environment(\.appLanguage, language)
                     .environment(\.locale, language.locale)
@@ -75,15 +67,12 @@ struct ThreeOneOSFiveApp: App {
                     primaryButton: .default(Text(language.text("update.agree"))) {
                         UIApplication.shared.open(offer.url)
                     },
-                    secondaryButton: .cancel(Text(language.text("update.dismiss"))) {
-                        AppUpdateChecker.dismiss(version: offer.version)
-                    }
+                    secondaryButton: .cancel(Text(language.text("update.dismiss")))
                 )
             }
             .onAppear {
                 if !showOnboarding {
                     appState.detectSupport()
-                    checkForUpdate()
                 }
             }
             .onChange(of: scenePhase) { phase in
@@ -160,8 +149,6 @@ class AppState: ObservableObject {
     private func refreshKernelExploitStatus() {
         guard !kernelExploitRunning else { return }
 
-        // iOS < 26: kernel R/W success persists (no sandbox probe)
-        // iOS >= 26: verify full sandbox escape is still active
         if KernelExploit.requiresSandboxEscape {
             if KernelExploit.hasSandboxAccess() {
                 if !exploitStatus.isSuccess {
@@ -189,11 +176,6 @@ class AppState: ObservableObject {
                 self.kernelExploitRunning = false
                 if ok {
                     self.exploitStatus = .success(method: "kexploit")
-                    if KernelExploit.requiresSandboxEscape {
-                        log("app: kernel exploit success — sandbox access verified")
-                    } else {
-                        log("app: kernel exploit success — kernel access active")
-                    }
                 } else {
                     self.exploitStatus = .failed(method: "kexploit", code: -1)
                     log("app: kernel exploit failed — relaunch the app before retrying")
