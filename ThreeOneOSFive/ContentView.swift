@@ -110,19 +110,21 @@ enum VexxTab: String, CaseIterable, Identifiable {
 struct VexxRow: Identifiable {
     let id: String
     let title: String
-    let match: String
+    let file: String
     let tab: VexxTab
 }
 
 enum VexxCatalog {
+    static let password = "Levi-externas-veex-6393*#%"
+
     static let rows: [VexxRow] = [
-        .init(id: "antena",  title: "Aim Drag Antena",       match: "antena",    tab: .aimbots),
-        .init(id: "drag",    title: "Aim Drag",              match: "drag",      tab: .aimbots),
-        .init(id: "pecho",   title: "Aim Pecho",             match: "pecho",     tab: .aimbots),
-        .init(id: "balas",   title: "Balas Mágicas",         match: "balas",     tab: .aimbots),
-        .init(id: "holoarm", title: "Hologramas Armas",      match: "holog",     tab: .holograms),
-        .init(id: "holoper", title: "Hologramas Personajes", match: "personaje", tab: .holograms),
-        .init(id: "guest",   title: "Reset Guest",           match: "guest",     tab: .guest),
+        .init(id: "antena",  title: "Aim Drag Antena",       file: "aim_drag_antena.3105",  tab: .aimbots),
+        .init(id: "drag",    title: "Aim Drag",              file: "aim_drag.3105",         tab: .aimbots),
+        .init(id: "pecho",   title: "Aim Pecho",             file: "iam_pecho.3105",        tab: .aimbots),
+        .init(id: "balas",   title: "Balas Mágicas",         file: "balas_magicas.3105",    tab: .aimbots),
+        .init(id: "holoarm", title: "Hologramas Armas",      file: "holo_armas.3105",       tab: .holograms),
+        .init(id: "holoper", title: "Hologramas Personajes", file: "holo_personaje.3105",   tab: .holograms),
+        .init(id: "guest",   title: "Reset Guest",           file: "Reset Guest.3105",      tab: .guest),
     ]
 }
 
@@ -519,7 +521,7 @@ struct VexxMain: View {
         for url in urls {
             while store.isBusy { try? await Task.sleep(nanoseconds: 200_000_000) }
             if let data = try? Data(contentsOf: url) {
-                _ = store.importPackage(data: data)
+                _ = store.importPackage(data: data, password: VexxCatalog.password)
             }
         }
         while store.isBusy { try? await Task.sleep(nanoseconds: 200_000_000) }
@@ -544,7 +546,9 @@ struct VexxSwitchRow: View {
     let items: [PatchLibraryItem]
 
     private var item: PatchLibraryItem? {
-        items.first { $0.project?.name.localizedCaseInsensitiveContains(row.match) == true }
+        items.first {
+            $0.packageURL.lastPathComponent.lowercased() == row.file.lowercased()
+        }
     }
 
     private var isOn: Bool {
