@@ -189,8 +189,6 @@ final class VexxEngine: ObservableObject {
     @Published private(set) var active: Set<UUID> = []
     @Published var busyID: UUID?
     @Published var error: String?
-    @Published var seedLog: [String] = []
-    @Published var retryToken = 0
 
     func refresh(_ items: [PatchLibraryItem]) {
         active = Set(items.filter { DevicePatchService.latestReceipt(projectID: $0.id) != nil }.map(\.id))
@@ -638,9 +636,7 @@ struct VexxMain: View {
             .sheet(isPresented: $showSettings) {
                 VexxSettings(engine: engine, license: license)
             }
-            .task(id: engine.retryToken) {
-                engine.refresh(store.items)
-            }
+            .task { engine.refresh(store.items) }
         }
     }
 
@@ -662,27 +658,39 @@ struct VexxSwitchRow: View {
     @ObservedObject var engine: VexxEngine
     let item: PatchLibraryItem?
 
+    @State private var pending = false
+
     private var isOn: Bool {
         item.map { engine.active.contains($0.id) } ?? false
     }
 
     var body: some View {
         Toggle(isOn: Binding(
-            get: { isOn },
-            set: { _ in engine.toggleRow(row, store: store) }
+            get: { isOn || pending },
+            set: { _ in
+                pending = true
+                engine.toggleRow(row, store: store)
+            }
         )) {
             HStack(spacing: 11) {
                 Circle()
-                    .fill(isOn ? VexxTheme.on : VexxTheme.off)
+                    .fill(pending ? Color.orange : (isOn ? VexxTheme.on : VexxTheme.off))
                     .frame(width: 8, height: 8)
-                    .shadow(color: (isOn ? VexxTheme.on : VexxTheme.off).opacity(0.8), radius: 6)
+                    .shadow(
+                        color: (pending ? Color.orange : (isOn ? VexxTheme.on : VexxTheme.off)).opacity(0.8),
+                        radius: 6
+                    )
                 VStack(alignment: .leading, spacing: 2) {
                     Text(row.title)
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.white)
-                    Text(isOn ? "activado" : "desactivado")
+                    Text(pending ? "aplicando…" : (isOn ? "activado" : "desactivado"))
                         .font(.caption2)
-                        .foregroundStyle(isOn ? VexxTheme.on : .white.opacity(0.35))
+                        .foregroundStyle(pending ? .orange : (isOn ? VexxTheme.on : .white.opacity(0.35)))
+                }
+                if pending {
+                    Spacer()
+                    ProgressView().controlSize(.small)
                 }
             }
         }
@@ -697,12 +705,13 @@ struct VexxSwitchRow: View {
                 )
         )
         .animation(VexxTheme.spring, value: isOn)
+        .onChange(of: engine.busyID) { value in
+            if value == nil { pending = false }
+        }
     }
 }
 
 struct VexxSettings: View {
-    @EnvironmentObject private var store: PatchProjectStore
-    @ObservedObject var engine: VexxEngine
     @ObservedObject var license: VexxLicense
     @Environment(\.dismiss) private var dismiss
     @State private var copied = false
@@ -736,31 +745,6 @@ struct VexxSettings: View {
                     }
                 } header: {
                     Text("Tu key")
-                }
-
-                Section {
-                    Text("En biblioteca: \(store.items.count)")
-                        .font(.caption.monospaced())
-                    ForEach(store.items, id: \.id) { item in
-                        Text(item.packageURL.deletingPathExtension().lastPathComponent)
-                            .font(.caption2.monospaced())
-                            .foregroundStyle(.secondary)
-                    }
-                    Button("Refrescar") { engine.refresh(store.items) }
-                } header: {
-                    Text("Depuración")
-                }
-
-                if !engine.seedLog.isEmpty {
-                    Section {
-                        ForEach(engine.seedLog, id: \.self) { line in
-                            Text(line)
-                                .font(.caption2.monospaced())
-                                .foregroundStyle(.orange)
-                        }
-                    } header: {
-                        Text("Errores")
-                    }
                 }
 
                 Section {
