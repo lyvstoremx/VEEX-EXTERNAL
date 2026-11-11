@@ -194,6 +194,8 @@ final class VexxEngine: ObservableObject {
         active = Set(items.filter { DevicePatchService.latestReceipt(projectID: $0.id) != nil }.map(\.id))
     }
 
+    func clearError() { error = nil }
+
     func toggleRow(_ row: VexxRow, store: PatchProjectStore) {
         guard busyID == nil else { return }
         busyID = UUID()
@@ -206,7 +208,7 @@ final class VexxEngine: ObservableObject {
                 }
 
                 if let existing = map[row.id],
-                   await MainActor.run(body: { self.active.contains(existing.id) }) {
+                   DevicePatchService.latestReceipt(projectID: existing.id) != nil {
                     try Self.restoreOne(existing)
                     await MainActor.run {
                         _ = self.active.remove(existing.id)
@@ -221,11 +223,12 @@ final class VexxEngine: ObservableObject {
                         VexxCatalog.rows
                             .filter { $0.tab == .aimbots && $0.id != row.id }
                             .compactMap { map[$0.id] }
-                            .filter { self.active.contains($0.id) }
+                            .filter { DevicePatchService.latestReceipt(projectID: $0.id) != nil }
                     }
                     for other in others {
-                        try? Self.restoreOne(other)
+                        try Self.restoreOne(other)
                         await MainActor.run { _ = self.active.remove(other.id) }
+                        try? await Task.sleep(nanoseconds: 300_000_000)
                     }
                 }
 
@@ -592,6 +595,20 @@ struct VexxMain: View {
                     .pickerStyle(.segmented)
                     .padding(.horizontal)
                     .animation(VexxTheme.spring, value: tab)
+
+                    if let error = engine.error {
+                        Text(error)
+                            .font(.caption2.monospaced())
+                            .foregroundStyle(VexxTheme.off)
+                            .lineLimit(2)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 8)
+                            .background(VexxTheme.off.opacity(0.12), in: .rect(cornerRadius: 10))
+                            .padding(.horizontal)
+                            .padding(.top, 8)
+                            .onTapGesture { engine.clearError() }
+                    }
 
                     List {
                         let map = VexxMatch.assignment(rows: VexxCatalog.rows, items: store.items)
