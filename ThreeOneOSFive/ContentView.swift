@@ -1,810 +1,606 @@
+//
+//  ContentView.swift
+//  VEEX EXTERNAL
+//
+
 import SwiftUI
 import UIKit
-import CryptoKit
 import AVFoundation
+import CryptoKit
 
-struct ContentView: View {
-    @Environment(\.appLanguage) private var language
-    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
-    @EnvironmentObject private var patchDraftCoordinator: PatchDraftCoordinator
-    @EnvironmentObject private var patchStore: PatchProjectStore
-    @EnvironmentObject private var repositoryStore: PackageRepositoryStore
-    @AppStorage(FeatureVisibility.developerModeStorageKey)
-    private var developerModeEnabled = false
-    @State private var tabNavigation: AppTabNavigationState
-    @State private var showSettings = false
-    @State private var showLogs = false
-
-    init() {
-        _tabNavigation = State(initialValue: AppTabNavigationState())
-    }
-
-    var body: some View {
-        VexxRoot()
-            .tint(VexxTheme.accent)
-            .imageScale(.small)
-            .sheet(isPresented: $showSettings) { SettingsView() }
-            .sheet(isPresented: $showLogs) { LogView() }
-            .patchStorePresentation(patchStore)
-            .repositoryStorePresentation(repositoryStore, patchStore: patchStore)
-    }
-}
-
-private struct CompactTabLabel: View {
-    let title: String
-    let systemImage: String
-
-    @ViewBuilder
-    var body: some View {
-        if let image = UIImage(
-            systemName: systemImage,
-            withConfiguration: UIImage.SymbolConfiguration(pointSize: 17, weight: .medium)
-        )?.withRenderingMode(.alwaysTemplate) {
-            Image(uiImage: image)
-        } else {
-            Image(systemName: systemImage)
-                .font(.system(size: 17, weight: .medium))
-        }
-        Text(title)
-    }
-}
-
-private extension AppSection {
-    var titleKey: String {
-        switch self {
-        case .home: return "tab.home"
-        case .new: return "tab.new"
-        case .sources: return "tab.sources"
-        case .installed: return "tab.installed"
-        case .files: return "tab.files"
-        case .search: return "tab.search"
-        }
-    }
-
-    var systemImage: String {
-        switch self {
-        case .home: return "house.fill"
-        case .new: return "clock.fill"
-        case .sources: return "shippingbox.fill"
-        case .installed: return "tray.full.fill"
-        case .files: return "folder.fill"
-        case .search: return "magnifyingglass"
-        }
-    }
-}
-
-// MARK: - VEEX
-
-enum VexxTheme {
-    static let accent   = Color(white: 0.94)
-    static let accentHi = Color.white
-    static let bgTop    = Color(white: 0.10)
-    static let bgBottom = Color(white: 0.01)
-    static let card     = Color.white.opacity(0.07)
-    static let stroke   = Color.white.opacity(0.14)
-    static let on       = Color(red: 0.30, green: 0.85, blue: 0.50)
-    static let off      = Color(red: 0.95, green: 0.35, blue: 0.40)
-    static let spring   = Animation.spring(response: 0.32, dampingFraction: 0.68)
-    static let supportedList = "iOS 17.0–17.7 · 18.0–18.7.1 · 26.0–26.6.1 · 27 betas 1–4"
-}
-
-struct VexxPressStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .scaleEffect(configuration.isPressed ? 0.97 : 1)
-            .opacity(configuration.isPressed ? 0.82 : 1)
-            .animation(.spring(response: 0.24, dampingFraction: 0.7), value: configuration.isPressed)
-    }
-}
-
-enum VexxError: Error, CustomStringConvertible {
-    case notBundled
-    case importFailed(String)
-
+// MARK: - Error
+enum VexxError: LocalizedError, CustomStringConvertible {
+    case message(String)
     var description: String {
-        switch self {
-        case .notBundled: return "parche no encontrado en el paquete"
-        case .importFailed(let reason): return "import falló: \(reason)"
-        }
+        switch self { case .message(let m): return m }
     }
+    var errorDescription: String? { description }
 }
 
-enum VexxEvent: String { case on, off, error, gate }
-
-enum VexxVoice {
-    private static var player: AVAudioPlayer?
-    static func play(_ event: VexxEvent) {
-        let exts = ["mp3", "m4a", "m4b", "caf", "wav"]
-        guard let url = exts
-            .compactMap({ Bundle.main.url(forResource: event.rawValue, withExtension: $0) })
-            .first else { return }
+// MARK: - Audio
+@MainActor
+final class VexxAudio {
+    static let shared = VexxAudio()
+    private var player: AVAudioPlayer?
+    func play(_ name: String) {
+        guard let url = Bundle.main.url(forResource: name, withExtension: "mp3") else { return }
         try? AVAudioSession.sharedInstance().setCategory(.ambient, options: [.mixWithOthers])
         player = try? AVAudioPlayer(contentsOf: url)
         player?.play()
     }
 }
 
-enum VexxTab: String, CaseIterable, Identifiable {
-    case aimbots = "Aimbots", holograms = "Hologramas", guest = "Borrar Invitado"
-    var id: String { rawValue }
-}
+// MARK: - Catálogo
+enum VexxGroup { case aim, holo, reset }
 
-struct VexxRow: Identifiable {
+struct VexxPatch: Identifiable {
     let id: String
     let title: String
-    let file: String
-    let tab: VexxTab
+    let pkg: String
+    let group: VexxGroup
 }
 
 enum VexxCatalog {
     static let password = "Levi-externas-veex-6393*#%"
-
-    static let rows: [VexxRow] = [
-        .init(id: "antena",  title: "Aim Drag Antena",       file: "aim_drag_antena.3105",  tab: .aimbots),
-        .init(id: "drag",    title: "Aim Drag",              file: "aim_drag.3105",         tab: .aimbots),
-        .init(id: "pecho",   title: "Aim Pecho",             file: "aim_pecho.3105",        tab: .aimbots),
-        .init(id: "balas",   title: "Balas Mágicas",         file: "balas_magicas.3105",    tab: .aimbots),
-        .init(id: "holoarm", title: "Hologramas Armas",      file: "holo_armas.3105",       tab: .holograms),
-        .init(id: "holoper", title: "Hologramas Personajes", file: "holo_personaje.3105",   tab: .holograms),
-        .init(id: "guest",   title: "Reset Guest",           file: "Reset Guest.3105",      tab: .guest),
+    static let all: [VexxPatch] = [
+        .init(id: "aim_drag", title: "Aim Drag Antena", pkg: "aim_drag_antena", group: .aim),
+        .init(id: "aim_pecho", title: "Aim Pecho", pkg: "aim_pecho", group: .aim),
+        .init(id: "balas", title: "Balas Mágicas", pkg: "balas_magicas", group: .aim),
+        .init(id: "holo_arma", title: "Hologramas Armas", pkg: "holo_arma", group: .holo),
+        .init(id: "holo_pers", title: "Hologramas Personajes", pkg: "holo_personaje", group: .holo),
+        .init(id: "reset", title: "Borrar Invitado", pkg: "reset_guest", group: .reset)
     ]
 }
 
-enum VexxMatch {
-    static func score(_ row: VexxRow, _ item: PatchLibraryItem) -> Int {
-        let key = row.file.replacingOccurrences(of: ".3105", with: "").lowercased()
-        let full = row.file.lowercased()
-        let f = item.packageURL.deletingPathExtension().lastPathComponent.lowercased()
-        let n = (item.project?.name ?? "").lowercased()
-
-        var best = 0
-        for t in [f, n] where !t.isEmpty {
-            if t == key || t == full {
-                best = max(best, 100)
-            } else if t.hasPrefix(key) {
-                best = max(best, 60 - abs(t.count - key.count))
-            } else if key.hasPrefix(t) {
-                best = max(best, 50 - abs(key.count - t.count))
-            } else if t.contains(key) || key.contains(t) {
-                best = max(best, 30)
-            }
-        }
-        return best
-    }
-
-    static func assignment(
-        rows: [VexxRow],
-        items: [PatchLibraryItem]
-    ) -> [String: PatchLibraryItem] {
-        var candidates: [(rowID: String, item: PatchLibraryItem, score: Int)] = []
-        for row in rows {
-            let scored = items.map { (item: $0, score: score(row, $0)) }.filter { $0.score > 0 }
-            guard let top = scored.max(by: { $0.score < $1.score }) else { continue }
-            candidates.append((row.id, top.item, top.score))
-        }
-
-        var result: [String: PatchLibraryItem] = [:]
-        var used = Set<UUID>()
-        for candidate in candidates.sorted(by: { $0.score > $1.score }) {
-            guard !used.contains(candidate.item.id) else { continue }
-            used.insert(candidate.item.id)
-            result[candidate.rowID] = candidate.item
-        }
-        return result
-    }
-}
-
-@MainActor
-final class VexxEngine: ObservableObject {
-    @Published private(set) var active: Set<UUID> = []
-    @Published var busyID: UUID?
-    @Published var error: String?
-
-    func refresh(_ items: [PatchLibraryItem]) {
-        active = Set(items.filter { DevicePatchService.latestReceipt(projectID: $0.id) != nil }.map(\.id))
-    }
-
-    func clearError() { error = nil }
-
-    func toggleRow(_ row: VexxRow, store: PatchProjectStore) {
-        guard busyID == nil else { return }
-        busyID = UUID()
-        error = nil
-
-        Task.detached(priority: .userInitiated) {
-            do {
-                var map = await MainActor.run {
-                    VexxMatch.assignment(rows: VexxCatalog.rows, items: store.items)
-                }
-
-                if let existing = map[row.id],
-                   DevicePatchService.latestReceipt(projectID: existing.id) != nil {
-                    try Self.restoreOne(existing)
-                    await MainActor.run {
-                        _ = self.active.remove(existing.id)
-                        self.busyID = nil
-                        VexxVoice.play(.off)
-                    }
-                    return
-                }
-
-                if row.tab == .aimbots {
-                    let others = await MainActor.run {
-                        VexxCatalog.rows
-                            .filter { $0.tab == .aimbots && $0.id != row.id }
-                            .compactMap { map[$0.id] }
-                            .filter { DevicePatchService.latestReceipt(projectID: $0.id) != nil }
-                    }
-                    for other in others {
-                        try Self.restoreOne(other)
-                        await MainActor.run { _ = self.active.remove(other.id) }
-                        try? await Task.sleep(nanoseconds: 300_000_000)
-                    }
-                }
-
-                var target = map[row.id]
-
-                if target == nil {
-                    try await Self.importBundled(row: row, store: store)
-                    map = await MainActor.run {
-                        VexxMatch.assignment(rows: VexxCatalog.rows, items: store.items)
-                    }
-                    target = map[row.id]
-                }
-
-                guard let item = target else { throw VexxError.notBundled }
-
-                try Self.applyOne(item)
-                await MainActor.run {
-                    self.active.insert(item.id)
-                    self.busyID = nil
-                    VexxVoice.play(.on)
-                }
-            } catch {
-                await MainActor.run {
-                    self.busyID = nil
-                    self.error = "\(error)"
-                    VexxVoice.play(.error)
-                }
-            }
-        }
-    }
-
-    private nonisolated static func importBundled(
-        row: VexxRow,
-        store: PatchProjectStore
-    ) async throws {
-        let base = row.file.replacingOccurrences(of: ".3105", with: "")
-        guard let url = Bundle.main.url(forResource: row.file, withExtension: nil)
-            ?? Bundle.main.url(forResource: base, withExtension: "3105"),
-              let data = try? Data(contentsOf: url) else {
-            throw VexxError.notBundled
-        }
-
-        var lastReason = "desconocido"
-
-        for _ in 0..<3 {
-            while await MainActor.run(body: { store.isBusy }) {
-                try? await Task.sleep(nanoseconds: 200_000_000)
-            }
-
-            await MainActor.run { store.alert = nil }
-
-            let started = await MainActor.run {
-                store.importPackage(data: data, password: VexxCatalog.password)
-            }
-            if !started {
-                lastReason = "biblioteca ocupada"
-                try? await Task.sleep(nanoseconds: 500_000_000)
-                continue
-            }
-
-            for _ in 0..<24 {
-                try? await Task.sleep(nanoseconds: 250_000_000)
-                let state = await MainActor.run {
-                    (
-                        store.alert?.messageKey,
-                        VexxMatch.assignment(rows: VexxCatalog.rows, items: store.items)[row.id] != nil
-                    )
-                }
-                if state.1 { return }
-                if let key = state.0 {
-                    lastReason = key
-                    break
-                }
-            }
-            try? await Task.sleep(nanoseconds: 500_000_000)
-        }
-
-        throw VexxError.importFailed(lastReason)
-    }
-
-    private nonisolated static func applyOne(_ item: PatchLibraryItem) throws {
-        guard let base = item.project else { return }
-        let project = item.summary.schemaVersion >= 2 && item.canInspectContents
-            ? try PatchProjectLibrary.synchronizeWorkspace(item: item)
-            : base
-        _ = try DevicePatchService.apply(project: project)
-    }
-
-    private nonisolated static func restoreOne(_ item: PatchLibraryItem) throws {
-        guard let receipt = DevicePatchService.latestReceipt(projectID: item.id) else { return }
-        let inspection = try DevicePatchService.inspectRestore(receipt: receipt)
-        try DevicePatchService.restore(
-            receipt: receipt,
-            allowChangedTargets: !inspection.changedTargets.isEmpty
-        )
-    }
-}
-
+// MARK: - Licencia
 @MainActor
 final class VexxLicense: ObservableObject {
-    @Published var isValid = false
-    @Published var error: String?
-    @Published private(set) var expiry: Date?
-    @Published private(set) var storedKey: String = ""
+    static let masters: Set<String> = ["VEEX-LEVI-2004", "VEEX-LEVI-FF26"]
+    private static let secret = "veex-externas-levi-2026"
+    private static let alpha = Array("ABCDEFGHJKLMNPQRSTUVWXYZ23456789")
+    private static let kKey = "veex.key"
+    private static let kDev = "veex.devices"
 
-    static let masterKeys = ["VEEX-LEVI-2004", "VEEX-LEVI-FF26"]
-    static let secret    = "VEEX-3105-LEVI"
-    private let alpha = Array("ABCDEFGHJKLMNPQRSTUVWXYZ23456789")
-    private let epoch = Date(timeIntervalSince1970: 1_767_225_600)
+    @Published var valid = false
+    @Published var master = false
+    @Published var expiry: Date?
+    @Published var message: String?
 
-    private func norm(_ s: String) -> String {
-        s.uppercased().replacingOccurrences(of: "-", with: "").replacingOccurrences(of: " ", with: "")
+    init() { if let saved = UserDefaults.standard.string(forKey: Self.kKey) { _ = activate(saved, silent: true) } }
+
+    var idfv: String { UIDevice.current.identifierForVendor?.uuidString ?? "sin-id" }
+
+    private func tag() -> [UInt8] {
+        let h = SHA256.hash(data: Data((idfv + Self.secret).utf8))
+        return Array(h).prefix(4).map { $0 }
     }
 
-    static var deviceID: String {
-        let u = UIDevice.current.identifierForVendor?.uuidString ?? "unknown"
-        return String(u.replacingOccurrences(of: "-", with: "").prefix(8)).uppercased()
-    }
-
-    init() {
-        let t = UserDefaults.standard.double(forKey: "vexx.exp")
-        storedKey = UserDefaults.standard.string(forKey: "vexx.key") ?? ""
-        if t == .infinity {
-            isValid = true
-            expiry = nil
-        } else if t > 0 {
-            let d = Date(timeIntervalSince1970: t)
-            expiry = d
-            isValid = d > Date()
-        }
-    }
-
-    var remainingText: String {
-        guard let expiry else { return "Permanente" }
-        let days = Calendar.current.dateComponents([.day], from: Date(), to: expiry).day ?? 0
-        if days <= 0 { return "Vence hoy" }
-        return days == 1 ? "1 día restante" : "\(days) días restantes"
-    }
-
-    func activate(_ raw: String) {
-        let c = norm(raw)
-
-        if Self.masterKeys.contains(where: { norm($0) == c }) {
-            grant(nil, key: raw.uppercased())
-            return
-        }
-
-        guard c.count == 11, c.hasPrefix("VEEX") else { error = "Formato inválido"; return }
-        let body = String(c.dropFirst(4))
-        let expPart = String(body.prefix(4))
-        let sig = String(body.suffix(3))
-        guard let exp = decodeExpiry(expPart) else { error = "Key inválida"; return }
-        guard sig == sign(expiry: expPart) else { error = "Key incorrecta"; return }
-        guard exp > Date() else { error = "Key vencida"; return }
-        grant(exp, key: raw.uppercased())
-    }
-
-    func signOut() {
-        isValid = false
-        expiry = nil
-        storedKey = ""
-        UserDefaults.standard.removeObject(forKey: "vexx.exp")
-        UserDefaults.standard.removeObject(forKey: "vexx.key")
-    }
-
-    private func grant(_ exp: Date?, key: String) {
-        isValid = true
-        error = nil
-        expiry = exp
-        storedKey = key
-        UserDefaults.standard.set(exp?.timeIntervalSince1970 ?? .infinity, forKey: "vexx.exp")
-        UserDefaults.standard.set(key, forKey: "vexx.key")
-    }
-
-    private func sign(expiry: String) -> String {
-        let key = SymmetricKey(data: Data(Self.secret.utf8))
-        let mac = HMAC<SHA256>.authenticationCode(for: Data((Self.deviceID + expiry).utf8), using: key)
-        var n = mac.prefix(8).reduce(UInt64(0)) { ($0 << 8) | UInt64($1) }
+    private static func b32(_ bytes: [UInt8]) -> String {
         var out = ""
-        for _ in 0..<3 { out.append(alpha[Int(n % 32)]); n /= 32 }
+        var buffer = 0, bits = 0
+        for b in bytes {
+            buffer = (buffer << 8) | Int(b)
+            bits += 8
+            while bits >= 5 {
+                out.append(alpha[(buffer >> (bits - 5)) & 31])
+                bits -= 5
+            }
+        }
+        if bits > 0 { out.append(alpha[(buffer << (5 - bits)) & 31]) }
         return out
     }
 
-    private func decodeExpiry(_ s: String) -> Date? {
-        var n = 0
-        for ch in s {
+    private static func unb32(_ s: String) -> [UInt8]? {
+        var out: [UInt8] = []
+        var buffer = 0, bits = 0
+        for ch in s.uppercased() {
             guard let i = alpha.firstIndex(of: ch) else { return nil }
-            n = n * 32 + i
+            buffer = (buffer << 5) | i
+            bits += 5
+            if bits >= 8 {
+                out.append(UInt8((buffer >> (bits - 8)) & 0xFF))
+                bits -= 8
+            }
         }
-        return Calendar.current.date(byAdding: .day, value: n, to: epoch)
+        return out
+    }
+
+    @discardableResult
+    func activate(_ raw: String, silent: Bool = false) -> Bool {
+        let key = raw.uppercased().replacingOccurrences(of: " ", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        message = nil
+
+        if Self.masters.contains(key) {
+            master = true; valid = true; expiry = nil
+            UserDefaults.standard.set(key, forKey: Self.kKey)
+            return true
+        }
+
+        let parts = key.split(separator: "-")
+        guard parts.count == 3, parts[0] == "VEEX",
+              let payload = Self.unb32(String(parts[1])), payload.count == 7,
+              let sig = Self.unb32(String(parts[2])), sig.count >= 5 else {
+            if !silent { message = "key inválida" }
+            return false
+        }
+
+        let mac = HMAC<SHA256>.authenticationCode(for: Data(payload), using: SymmetricKey(data: Data(Self.secret.utf8)))
+        guard Array(mac).prefix(5).elementsEqual(sig.prefix(5)) else {
+            if !silent { message = "key inválida" }
+            return false
+        }
+
+        let days = Int(payload[0]) << 8 | Int(payload[1])
+        let date = Calendar.current.date(byAdding: .day, value: days, to: Date(timeIntervalSince1970: 1_577_836_800)) ?? Date()
+        guard date > Date() else {
+            if !silent { message = "key vencida" }
+            return false
+        }
+
+        if payload[2] & 1 == 1, !Array(payload[3...6]).elementsEqual(tag()) {
+            if !silent { message = "key de otro dispositivo" }
+            return false
+        }
+
+        var devs = UserDefaults.standard.dictionary(forKey: Self.kDev) as? [String: [String]] ?? [:]
+        var list = devs[key] ?? []
+        if !list.contains(idfv) {
+            if payload[2] & 2 == 0, list.count >= 1 {
+                if !silent { message = "key en uso en otro dispositivo" }
+                return false
+            }
+            list.append(idfv); devs[key] = list
+            UserDefaults.standard.set(devs, forKey: Self.kDev)
+        }
+
+        master = false; valid = true; expiry = date
+        UserDefaults.standard.set(key, forKey: Self.kKey)
+        return true
+    }
+
+    func forget() {
+        valid = false; master = false; expiry = nil
+        UserDefaults.standard.removeObject(forKey: Self.kKey)
+    }
+
+    var remaining: String {
+        if master { return "Permanente" }
+        guard let expiry else { return "—" }
+        let days = max(0, Calendar.current.dateComponents([.day], from: Date(), to: expiry).day ?? 0)
+        return days == 0 ? "Vence hoy" : "\(days) días"
+    }
+
+    var devices: Int {
+        let devs = UserDefaults.standard.dictionary(forKey: Self.kDev) as? [String: [String]] ?? [:]
+        return (devs[UserDefaults.standard.string(forKey: Self.kKey) ?? ""] ?? []).count
     }
 }
 
-struct VexxRoot: View {
-    @EnvironmentObject private var appState: AppState
-    @EnvironmentObject private var store: PatchProjectStore
+enum VexxSupport {
+    static var isSupported: Bool {
+        let major = ProcessInfo.processInfo.operatingSystemVersion.majorVersion
+        return major >= 16 && major <= 27
+    }
+}
+
+// MARK: - Raíz
+struct ContentView: View {
     @StateObject private var license = VexxLicense()
-    @StateObject private var engine = VexxEngine()
     @State private var input = ""
-    @State private var appeared = false
-    @State private var glow = false
 
     var body: some View {
         Group {
-            if license.isValid {
-                VexxMain(engine: engine, license: license)
-                    .transition(.opacity)
-                    .task {
-                        appState.detectSupport()
-                        engine.refresh(store.items)
-                    }
+            if license.valid {
+                VexxMain(license: license)
             } else {
-                gate
+                VexxGate(input: $input, license: license)
             }
         }
-        .animation(.easeInOut(duration: 0.3), value: license.isValid)
+        .preferredColorScheme(.dark)
     }
+}
 
-    private var gate: some View {
+// MARK: - Gate
+struct VexxGate: View {
+    @Binding var input: String
+    @ObservedObject var license: VexxLicense
+    @State private var appeared = false
+
+    var body: some View {
         ZStack {
-            LinearGradient(colors: [VexxTheme.bgTop, VexxTheme.bgBottom], startPoint: .top, endPoint: .bottom)
-                .ignoresSafeArea()
-
-            RadialGradient(
-                colors: [Color.white.opacity(glow ? 0.16 : 0.06), .clear],
-                center: .top,
-                startRadius: 10,
-                endRadius: glow ? 420 : 300
-            )
-            .ignoresSafeArea()
-
-            VStack(spacing: 0) {
+            Color.black.ignoresSafeArea()
+            VStack(spacing: 22) {
                 Spacer()
-
                 Text("VEEX")
-                    .font(.system(size: 66, weight: .black))
-                    .tracking(12)
-                    .foregroundStyle(
-                        LinearGradient(
-                            colors: [VexxTheme.accentHi, Color(white: 0.55)],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                    )
-                    .shadow(color: .white.opacity(glow ? 0.5 : 0.15), radius: glow ? 32 : 12)
-                    .scaleEffect(appeared ? 1 : 0.9)
+                    .font(.system(size: 54, weight: .black, design: .rounded))
+                    .tracking(6)
+                    .foregroundStyle(.white)
+                    .scaleEffect(appeared ? 1 : 0.85)
                     .opacity(appeared ? 1 : 0)
-
-                Text("BY LEVI")
-                    .font(.system(size: 12, weight: .bold))
-                    .tracking(7)
-                    .foregroundStyle(.white.opacity(0.38))
-                    .padding(.top, 10)
-                    .opacity(appeared ? 1 : 0)
-
-                Spacer().frame(height: 46)
-
-                HStack(spacing: 10) {
-                    Image(systemName: "key.fill")
-                        .font(.footnote)
-                        .foregroundStyle(.white.opacity(0.7))
-                    TextField("VEEX-XXXX-XXX", text: $input)
-                        .textInputAutocapitalization(.characters)
-                        .autocorrectionDisabled()
-                        .font(.system(.subheadline, design: .monospaced))
-                        .foregroundStyle(.white)
-                        .tint(.white)
-                }
-                .padding(.horizontal, 18)
-                .frame(height: 56)
-                .background(VexxTheme.card, in: .rect(cornerRadius: 18))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 18)
-                        .stroke(input.isEmpty ? VexxTheme.stroke : .white.opacity(0.8), lineWidth: 1)
-                )
-                .shadow(color: input.isEmpty ? .clear : .white.opacity(0.25), radius: 16)
-                .animation(VexxTheme.spring, value: input.isEmpty)
 
                 HStack(spacing: 7) {
-                    Circle()
-                        .fill(appState.isSupported ? VexxTheme.on : VexxTheme.off)
-                        .frame(width: 7, height: 7)
-                    Text(appState.isSupported
-                         ? "iOS \(AppInfo.osVersion) soportado"
-                         : "iOS \(AppInfo.osVersion) no soportado")
-                        .font(.caption2.weight(.medium))
-                        .foregroundStyle(.white.opacity(0.55))
+                    Circle().fill(VexxSupport.isSupported ? .green : .red).frame(width: 8, height: 8)
+                    Text(VexxSupport.isSupported ? "Soportado" : "No soportado")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(VexxSupport.isSupported ? .green : .red)
                 }
-                .padding(.top, 15)
+                .opacity(appeared ? 1 : 0)
 
-                if let e = license.error {
-                    Text(e)
-                        .font(.caption)
-                        .foregroundStyle(VexxTheme.off)
-                        .padding(.top, 11)
-                        .transition(.opacity)
-                }
+                VStack(spacing: 12) {
+                    TextField("VEEX-XXXX-XXXX", text: $input)
+                        .textInputAutocapitalization(.characters)
+                        .autocorrectionDisabled()
+                        .font(.system(size: 15, weight: .semibold, design: .monospaced))
+                        .multilineTextAlignment(.center)
+                        .padding(.vertical, 14)
+                        .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 14))
 
-                Button {
-                    if input.isEmpty { license.error = "Escribe tu key"; return }
-                    guard appState.isSupported else {
-                        license.error = "Este iOS no está soportado"
-                        return
+                    if let m = license.message {
+                        Text(m).font(.system(size: 12, weight: .medium)).foregroundStyle(.red)
                     }
-                    license.activate(input)
-                    if license.isValid { VexxVoice.play(.gate) }
-                } label: {
-                    Text("Continuar")
-                        .font(.subheadline.weight(.bold))
-                        .foregroundStyle(VexxTheme.bgBottom)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 54)
-                        .contentShape(Rectangle())
-                        .background(
-                            LinearGradient(
-                                colors: [VexxTheme.accentHi, VexxTheme.accent],
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            ),
-                            in: .rect(cornerRadius: 18)
-                        )
-                        .shadow(color: .white.opacity(glow ? 0.4 : 0.2), radius: glow ? 22 : 12)
+
+                    Button {
+                        if license.activate(input) { VexxAudio.shared.play("on") }
+                    } label: {
+                        Text("Continuar")
+                            .font(.system(size: 16, weight: .bold))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 15)
+                            .background(Color.white, in: RoundedRectangle(cornerRadius: 14))
+                            .foregroundStyle(.black)
+                    }
+                    .buttonStyle(.plain)
+                    .scaleEffect(appeared ? 1 : 0.95)
                 }
-                .buttonStyle(VexxPressStyle())
-                .padding(.top, 26)
+                .padding(.horizontal, 26)
 
                 Spacer()
 
-                Text("SOPORTADO")
-                    .font(.system(size: 8, weight: .bold))
-                    .tracking(3)
-                    .foregroundStyle(.white.opacity(0.22))
-                Text(VexxTheme.supportedList)
-                    .font(.system(size: 9, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.32))
-                    .multilineTextAlignment(.center)
-                    .padding(.top, 3)
-
-                HStack(spacing: 22) {
-                    Link(destination: URL(string: "https://t.me/levibrouh")!) {
-                        Label("levibrouh", systemImage: "paperplane.fill")
+                VStack(spacing: 8) {
+                    Text("Levi").font(.system(size: 12, weight: .bold)).foregroundStyle(.white.opacity(0.5))
+                    HStack(spacing: 16) {
+                        Link("Canal", destination: URL(string: "https://t.me/levibrouhs")!)
+                        Link("Telegram", destination: URL(string: "https://t.me/levibrouh")!)
                     }
-                    Link(destination: URL(string: "https://t.me/levibrouhs")!) {
-                        Label("Canal", systemImage: "megaphone.fill")
-                    }
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.75))
                 }
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.white.opacity(0.55))
-                .padding(.top, 16)
-                .padding(.bottom, 16)
-                .opacity(appeared ? 1 : 0)
+                .padding(.bottom, 26)
             }
-            .padding(.horizontal, 30)
         }
-        .task {
-            appState.detectSupport()
-            withAnimation(.easeOut(duration: 0.55)) { appeared = true }
-            withAnimation(.easeInOut(duration: 2.4).repeatForever(autoreverses: true)) { glow = true }
+        .onAppear {
+            withAnimation(.spring(response: 0.6, dampingFraction: 0.8)) { appeared = true }
         }
     }
 }
 
+// MARK: - Principal
 struct VexxMain: View {
     @EnvironmentObject private var store: PatchProjectStore
-    @ObservedObject var engine: VexxEngine
     @ObservedObject var license: VexxLicense
-    @State private var tab: VexxTab = .aimbots
+
+    @State private var tab = 0
+    @State private var on: Set<String> = []
+    @State private var busy: String?
+    @State private var error: String?
     @State private var showSettings = false
 
-    var body: some View {
-        NavigationStack {
-            ZStack {
-                LinearGradient(colors: [VexxTheme.bgTop, VexxTheme.bgBottom], startPoint: .top, endPoint: .bottom)
-                    .ignoresSafeArea()
-
-                VStack(spacing: 0) {
-                    Picker("", selection: $tab) {
-                        ForEach(VexxTab.allCases) { Text($0.rawValue).tag($0) }
-                    }
-                    .pickerStyle(.segmented)
-                    .padding(.horizontal)
-                    .animation(VexxTheme.spring, value: tab)
-
-                    if let error = engine.error {
-                        Text(error)
-                            .font(.caption2.monospaced())
-                            .foregroundStyle(VexxTheme.off)
-                            .lineLimit(3)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 8)
-                            .background(VexxTheme.off.opacity(0.12), in: .rect(cornerRadius: 10))
-                            .padding(.horizontal)
-                            .padding(.top, 8)
-                            .onTapGesture { engine.clearError() }
-                    }
-
-                    List {
-                        let map = VexxMatch.assignment(rows: VexxCatalog.rows, items: store.items)
-                        ForEach(VexxCatalog.rows.filter { $0.tab == tab }) { row in
-                            VexxSwitchRow(row: row, engine: engine, item: map[row.id])
-                                .transition(.opacity.combined(with: .move(edge: .trailing)))
-                        }
-                    }
-                    .listStyle(.plain)
-                    .scrollContentBackground(.hidden)
-                    .animation(VexxTheme.spring, value: tab)
-
-                    Button { openFF() } label: {
-                        HStack(spacing: 9) {
-                            Image(systemName: "flame.fill")
-                            Text("ABRIR FREE FIRE")
-                        }
-                        .font(.subheadline.weight(.bold))
-                        .foregroundStyle(VexxTheme.bgBottom)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 56)
-                        .contentShape(Rectangle())
-                        .background(
-                            LinearGradient(
-                                colors: [VexxTheme.accentHi, VexxTheme.accent],
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            ),
-                            in: .rect(cornerRadius: 18)
-                        )
-                        .shadow(color: .white.opacity(0.25), radius: 14)
-                    }
-                    .buttonStyle(VexxPressStyle())
-                    .padding(.horizontal)
-                    .padding(.bottom, 10)
-                }
-            }
-            .navigationTitle("VEEX")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                Button { showSettings = true } label: {
-                    Image(systemName: "gearshape.fill")
-                        .foregroundStyle(.white.opacity(0.8))
-                }
-            }
-            .sheet(isPresented: $showSettings) {
-                VexxSettings(license: license)
-            }
-            .task { engine.refresh(store.items) }
+    private var rows: [VexxPatch] {
+        switch tab {
+        case 0: return VexxCatalog.all.filter { $0.group == .aim }
+        case 1: return VexxCatalog.all.filter { $0.group == .holo }
+        default: return VexxCatalog.all.filter { $0.group == .reset }
         }
+    }
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+            VStack(spacing: 0) {
+                header
+                if let error {
+                    HStack(spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 11))
+                        Text(error).font(.system(size: 11, weight: .medium)).lineLimit(2)
+                        Spacer(minLength: 0)
+                    }
+                    .foregroundStyle(.red)
+                    .padding(.horizontal, 16).padding(.vertical, 8)
+                    .background(Color.red.opacity(0.12))
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                }
+                tabs
+                ScrollView {
+                    VStack(spacing: 10) {
+                        ForEach(rows) { p in rowView(p) }
+                    }
+                    .padding(16)
+                }
+                footer
+            }
+        }
+        .task { sync() }
+        .sheet(isPresented: $showSettings) { VexxSettings(license: license) }
+    }
+
+    private var header: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("VEEX EXTERNAL")
+                    .font(.system(size: 17, weight: .black)).tracking(1)
+                    .foregroundStyle(.white)
+                HStack(spacing: 5) {
+                    Circle().fill(VexxSupport.isSupported ? .green : .red).frame(width: 6, height: 6)
+                    Text(VexxSupport.isSupported ? "Soportado" : "No soportado")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(VexxSupport.isSupported ? .green : .red)
+                }
+            }
+            Spacer()
+            Button { showSettings = true } label: {
+                Image(systemName: "gearshape.fill").font(.system(size: 17)).foregroundStyle(.white.opacity(0.85))
+            }
+        }
+        .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 12)
+    }
+
+    private var tabs: some View {
+        HStack(spacing: 6) {
+            ForEach(Array(["Aimbots", "Hologramas", "Borrar Invitado"].enumerated()), id: \.offset) { i, t in
+                Button {
+                    withAnimation(.snappy) { tab = i }
+                } label: {
+                    Text(t)
+                        .font(.system(size: 12, weight: .bold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 9)
+                        .background(tab == i ? Color.white : Color.white.opacity(0.07), in: Capsule())
+                        .foregroundStyle(tab == i ? .black : .white.opacity(0.7))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 16).padding(.bottom, 12)
+    }
+
+    private func rowView(_ p: VexxPatch) -> some View {
+        let active = on.contains(p.id)
+        let working = busy == p.id
+        return HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(p.title).font(.system(size: 14, weight: .semibold)).foregroundStyle(.white)
+                Text(active ? "Activado" : "Desactivado")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(active ? .green : .white.opacity(0.4))
+            }
+            Spacer()
+            if working {
+                ProgressView().tint(.white).scaleEffect(0.8)
+            } else {
+                Capsule()
+                    .fill(active ? Color.green : Color.red)
+                    .frame(width: 46, height: 26)
+                    .overlay(alignment: active ? .trailing : .leading) {
+                        Circle().fill(.white).frame(width: 20, height: 20).padding(3)
+                    }
+                    .animation(.snappy, value: active)
+            }
+        }
+        .padding(.horizontal, 14).padding(.vertical, 12)
+        .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.06)))
+        .contentShape(Rectangle())
+        .onTapGesture { toggle(p) }
+        .scaleEffect(working ? 0.98 : 1)
+        .animation(.snappy, value: working)
+    }
+
+    private var footer: some View {
+        HStack(spacing: 10) {
+            Button { openFF() } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "gamecontroller.fill").font(.system(size: 12))
+                    Text("Abrir Free Fire").font(.system(size: 13, weight: .bold))
+                }
+                .frame(maxWidth: .infinity).padding(.vertical, 12)
+                .background(Color.white, in: RoundedRectangle(cornerRadius: 13))
+                .foregroundStyle(.black)
+            }
+            .buttonStyle(.plain)
+            Button { sync() } label: {
+                Image(systemName: "arrow.clockwise").font(.system(size: 14, weight: .bold))
+                    .padding(.vertical, 12).padding(.horizontal, 16)
+                    .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 13))
+                    .foregroundStyle(.white)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(16)
+    }
+
+    // MARK: Lógica
+    private func cacheKey(_ p: VexxPatch) -> String { "veex.id." + p.id }
+
+    private func cache(_ id: UUID, _ p: VexxPatch) {
+        UserDefaults.standard.set(id.uuidString, forKey: cacheKey(p))
+    }
+
+    private func findItem(_ p: VexxPatch) -> PatchLibraryItem? {
+        if let raw = UserDefaults.standard.string(forKey: cacheKey(p)),
+           let id = UUID(uuidString: raw),
+           let hit = store.items.first(where: { $0.id == id }) { return hit }
+        if let hit = store.items.first(where: {
+            ($0.project?.name ?? "").lowercased() == p.pkg.lowercased()
+        }) {
+            cache(hit.id, p)
+            return hit
+        }
+        return nil
+    }
+
+    private func sync() {
+        var s = Set<String>()
+        for p in VexxCatalog.all {
+            if let item = findItem(p), DevicePatchService.latestReceipt(projectID: item.id) != nil {
+                s.insert(p.id)
+            }
+        }
+        on = s
+    }
+
+    private func waitIdle() async {
+        for _ in 0..<80 {
+            if !store.isBusy { break }
+            try? await Task.sleep(nanoseconds: 200_000_000)
+        }
+        try? await Task.sleep(nanoseconds: 300_000_000)
+    }
+
+    private func toggle(_ p: VexxPatch) {
+        guard busy == nil else { return }
+        busy = p.id
+        error = nil
+        let turningOn = !on.contains(p.id)
+        Task {
+            do {
+                if turningOn { try await turnOn(p) } else { try await turnOff(p) }
+                VexxAudio.shared.play(turningOn ? "on" : "off")
+            } catch {
+                self.error = "\(p.title): \(String(describing: error))"
+            }
+            sync()
+            busy = nil
+        }
+    }
+
+    private func turnOn(_ p: VexxPatch) async throws {
+        if p.group == .aim {
+            for other in VexxCatalog.all where other.group == .aim && other.id != p.id {
+                try? await turnOff(other)
+            }
+            sync()
+        }
+        let item = try await importPackage(p)
+        try await applyItem(item)
+    }
+
+    private func turnOff(_ p: VexxPatch) async throws {
+        guard let item = findItem(p) else {
+            on.remove(p.id)
+            return
+        }
+        if let receipt = DevicePatchService.latestReceipt(projectID: item.id) {
+            await waitIdle()
+            try await Task.detached(priority: .userInitiated) {
+                _ = try DevicePatchService.inspectRestore(receipt: receipt)
+                try DevicePatchService.restore(receipt: receipt, allowChangedTargets: true)
+            }.value
+            store.reload()
+        }
+        if p.group == .aim {
+            await waitIdle()
+            try? PatchProjectLibrary.delete(item)
+            store.reload()
+            UserDefaults.standard.removeObject(forKey: cacheKey(p))
+        }
+    }
+
+    private func importPackage(_ p: VexxPatch) async throws -> PatchLibraryItem {
+        if let existing = findItem(p) { return existing }
+        guard let url = Bundle.main.url(forResource: p.pkg, withExtension: "3105") else {
+            throw VexxError.message("falta \(p.pkg).3105 en el ipa")
+        }
+        let data = try Data(contentsOf: url)
+
+        for attempt in 1...4 {
+            await waitIdle()
+            let before = Set(store.items.map(\.id))
+            guard store.importPackage(data: data, password: VexxCatalog.password) else {
+                try? await Task.sleep(nanoseconds: 400_000_000)
+                continue
+            }
+            await waitIdle()
+            if let fresh = store.items.first(where: { !before.contains($0.id) }) {
+                cache(fresh.id, p)
+                return fresh
+            }
+            if let existing = findItem(p) { return existing }
+            try? await Task.sleep(nanoseconds: UInt64(attempt) * 400_000_000)
+        }
+        throw VexxError.message("import falló")
+    }
+
+    private func applyItem(_ item: PatchLibraryItem) async throws {
+        let project: PatchProject
+        if item.summary.schemaVersion >= 2, item.canInspectContents {
+            project = try PatchProjectLibrary.synchronizeWorkspace(item: item)
+        } else if let base = item.project {
+            project = base
+        } else {
+            throw VexxError.message("parche bloqueado")
+        }
+        await waitIdle()
+        try await Task.detached(priority: .userInitiated) {
+            _ = try DevicePatchService.apply(project: project)
+        }.value
+        store.reload()
     }
 
     private func openFF() {
         let schemes = ["freefire://", "freefiremax://"]
-        func attempt(_ index: Int) {
-            guard index < schemes.count, let url = URL(string: schemes[index]) else { return }
+        func attempt(_ i: Int) {
+            guard i < schemes.count, let url = URL(string: schemes[i]) else { return }
             UIApplication.shared.open(url, options: [:]) { ok in
-                if !ok { attempt(index + 1) }
+                if !ok { attempt(i + 1) }
             }
         }
         attempt(0)
     }
 }
 
-struct VexxSwitchRow: View {
-    @EnvironmentObject private var store: PatchProjectStore
-    let row: VexxRow
-    @ObservedObject var engine: VexxEngine
-    let item: PatchLibraryItem?
-
-    @State private var pending = false
-
-    private var isOn: Bool {
-        item.map { engine.active.contains($0.id) } ?? false
-    }
-
-    var body: some View {
-        Toggle(isOn: Binding(
-            get: { isOn || pending },
-            set: { _ in
-                pending = true
-                engine.toggleRow(row, store: store)
-            }
-        )) {
-            HStack(spacing: 11) {
-                Circle()
-                    .fill(pending ? Color.orange : (isOn ? VexxTheme.on : VexxTheme.off))
-                    .frame(width: 8, height: 8)
-                    .shadow(
-                        color: (pending ? Color.orange : (isOn ? VexxTheme.on : VexxTheme.off)).opacity(0.8),
-                        radius: 6
-                    )
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(row.title)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.white)
-                    Text(pending ? "aplicando…" : (isOn ? "activado" : "desactivado"))
-                        .font(.caption2)
-                        .foregroundStyle(pending ? .orange : (isOn ? VexxTheme.on : .white.opacity(0.35)))
-                }
-                if pending {
-                    Spacer()
-                    ProgressView().controlSize(.small)
-                }
-            }
-        }
-        .tint(isOn ? VexxTheme.on : VexxTheme.off)
-        .disabled(engine.busyID != nil)
-        .listRowBackground(
-            RoundedRectangle(cornerRadius: 14)
-                .fill(isOn ? VexxTheme.on.opacity(0.12) : VexxTheme.card)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14)
-                        .stroke(isOn ? VexxTheme.on.opacity(0.4) : Color.clear, lineWidth: 1)
-                )
-        )
-        .animation(VexxTheme.spring, value: isOn)
-        .onChange(of: engine.busyID) { value in
-            if value == nil { pending = false }
-        }
-    }
-}
-
+// MARK: - Ajustes
 struct VexxSettings: View {
-    @ObservedObject var license: VexxLicense
     @Environment(\.dismiss) private var dismiss
-    @State private var copied = false
+    @ObservedObject var license: VexxLicense
 
     var body: some View {
         NavigationStack {
-            List {
-                Section {
-                    HStack {
-                        Label("Tiempo", systemImage: "clock.fill")
-                        Spacer()
-                        Text(license.remainingText)
-                            .foregroundStyle(license.expiry == nil ? VexxTheme.on : Color.secondary)
-                    }
-                    HStack {
-                        Label("Dispositivos", systemImage: "iphone")
-                        Spacer()
-                        Text(license.expiry == nil ? "Ilimitados" : "1 · este iPhone")
-                            .foregroundStyle(.secondary)
-                    }
-                    Button {
-                        UIPasteboard.general.string = license.storedKey
-                        copied = true
-                    } label: {
-                        Label(copied ? "Key guardada" : "Guardar key", systemImage: "doc.on.doc.fill")
-                    }
-                    Button(role: .destructive) {
-                        license.signOut()
-                        dismiss()
-                    } label: {
-                        Label("Borrar key", systemImage: "trash.fill")
-                    }
-                } header: {
-                    Text("Tu key")
-                }
+            ZStack {
+                Color.black.ignoresSafeArea()
+                List {
+                    Section {
+                        LabeledContent("Estado") {
+                            Text(license.master ? "Permanente" : license.remaining)
+                                .foregroundStyle(license.master ? .green : .white)
+                        }
+                        LabeledContent("Dispositivos") {
+                            Text(license.master ? "Ilimitados" : "\(license.devices)")
+                        }
+                        LabeledContent("iOS") { Text(ProcessInfo.processInfo.operatingSystemVersionString) }
+                    } header: { Text("Licencia") }
 
-                Section {
-                    Link("t.me/levibrouh", destination: URL(string: "https://t.me/levibrouh")!)
-                    Link("t.me/levibrouhs", destination: URL(string: "https://t.me/levibrouhs")!)
-                } header: {
-                    Text("Telegram")
+                    Section {
+                        Link("Telegram", destination: URL(string: "https://t.me/levibrouh")!)
+                        Link("Canal", destination: URL(string: "https://t.me/levibrouhs")!)
+                    } header: { Text("Levi") }
+
+                    Section {
+                        Button("Borrar key", role: .destructive) {
+                            license.forget()
+                            dismiss()
+                        }
+                    }
                 }
+                .scrollContentBackground(.hidden)
             }
             .navigationTitle("Ajustes")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { Button("Listo") { dismiss() } }
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Listo") { dismiss() }
+                }
+            }
         }
     }
 }
