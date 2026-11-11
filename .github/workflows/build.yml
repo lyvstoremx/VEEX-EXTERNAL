@@ -5,14 +5,18 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Schemes
-        run: xcodebuild -list -project ThreeOneOSFive.xcodeproj
       - name: Build
         run: |
-          xcodebuild -project ThreeOneOSFive.xcodeproj -scheme 3105 \
+          xcodebuild -quiet -project ThreeOneOSFive.xcodeproj -scheme 3105 \
             -configuration Release -sdk iphoneos -derivedDataPath build \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
             -destination 'generic/platform=iOS'
+      - name: Embed content
+        run: |
+          APP=$(ls -d build/Build/Products/Release-iphoneos/*.app)
+          if [ -d patches ]; then cp -R patches/*.3105 "$APP"/ ; fi
+          if [ -d voices ]; then cp -R voices/*.m4a "$APP"/ ; fi
+          ls "$APP"
       - name: Package
         run: |
           mkdir -p out/Payload
