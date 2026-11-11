@@ -92,7 +92,10 @@ enum VexxEvent: String { case on, off, error, gate }
 enum VexxVoice {
     private static var player: AVAudioPlayer?
     static func play(_ event: VexxEvent) {
-        guard let url = Bundle.main.url(forResource: event.rawValue, withExtension: "m4a") else { return }
+        let exts = ["mp3", "m4a", "m4b", "caf", "wav"]
+        guard let url = exts
+            .compactMap({ Bundle.main.url(forResource: event.rawValue, withExtension: $0) })
+            .first else { return }
         try? AVAudioSession.sharedInstance().setCategory(.ambient, options: [.mixWithOthers])
         player = try? AVAudioPlayer(contentsOf: url)
         player?.play()
@@ -502,8 +505,25 @@ struct VexxMain: View {
             .sheet(isPresented: $showSettings) {
                 VexxSettings(license: license)
             }
-            .task { engine.refresh(store.items) }
+            .task {
+                engine.refresh(store.items)
+                await seedBundledPatches()
+            }
         }
+    }
+
+    private func seedBundledPatches() async {
+        guard !UserDefaults.standard.bool(forKey: "vexx.seeded") else { return }
+        UserDefaults.standard.set(true, forKey: "vexx.seeded")
+        let urls = Bundle.main.urls(forResourcesWithExtension: "3105", subdirectory: nil) ?? []
+        for url in urls {
+            while store.isBusy { try? await Task.sleep(nanoseconds: 200_000_000) }
+            if let data = try? Data(contentsOf: url) {
+                _ = store.importPackage(data: data)
+            }
+        }
+        while store.isBusy { try? await Task.sleep(nanoseconds: 200_000_000) }
+        engine.refresh(store.items)
     }
 
     private func openFF() {
