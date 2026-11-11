@@ -593,7 +593,7 @@ struct VexxSettings: View {
     var body: some View {
         NavigationStack {
             List {
-                Section("Tu key") {
+                Section {
                     HStack {
                         Label("Tiempo", systemImage: "clock.fill")
                         Spacer()
@@ -617,14 +617,18 @@ struct VexxSettings: View {
                     } label: {
                         Label("Borrar key", systemImage: "trash.fill")
                     }
+                } header: {
+                    Text("Tu key")
                 }
 
-                Section("Parches") {
+                Section {
                     Button("Restaurar todo") { confirmRestore = true }
                         .disabled(engine.busyID != nil)
                     if let e = engine.error {
                         Text(e).font(.caption2).foregroundStyle(.red)
                     }
+                } header: {
+                    Text("Parches")
                 } footer: {
                     Text("Desactiva todos los parches activos.")
                 }
