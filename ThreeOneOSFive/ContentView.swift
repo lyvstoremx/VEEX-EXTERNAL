@@ -634,7 +634,7 @@ struct VexxMain: View {
                 }
             }
             .sheet(isPresented: $showSettings) {
-                VexxSettings(engine: engine, license: license)
+                VexxSettings(license: license)
             }
             .task { engine.refresh(store.items) }
         }
