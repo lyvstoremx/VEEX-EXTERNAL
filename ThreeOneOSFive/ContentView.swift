@@ -76,15 +76,25 @@ private extension AppSection {
 // MARK: - VEEX
 
 enum VexxTheme {
-    static let accent   = Color(red: 0.36, green: 0.74, blue: 1.00)
-    static let accentHi = Color(red: 0.62, green: 0.87, blue: 1.00)
-    static let bgTop    = Color(red: 0.05, green: 0.08, blue: 0.14)
-    static let bgBottom = Color(red: 0.02, green: 0.03, blue: 0.06)
-    static let card     = Color.white.opacity(0.06)
-    static let stroke   = Color.white.opacity(0.12)
+    static let accent   = Color(white: 0.94)
+    static let accentHi = Color.white
+    static let bgTop    = Color(white: 0.10)
+    static let bgBottom = Color(white: 0.01)
+    static let card     = Color.white.opacity(0.07)
+    static let stroke   = Color.white.opacity(0.14)
     static let on       = Color(red: 0.30, green: 0.85, blue: 0.50)
     static let off      = Color(red: 0.95, green: 0.35, blue: 0.40)
     static let spring   = Animation.spring(response: 0.32, dampingFraction: 0.68)
+    static let supportedList = "iOS 17.0–17.7 · 18.0–18.7.1 · 26.0–26.6.1 · 27 betas 1–4"
+}
+
+struct VexxPressStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.97 : 1)
+            .opacity(configuration.isPressed ? 0.82 : 1)
+            .animation(.spring(response: 0.24, dampingFraction: 0.7), value: configuration.isPressed)
+    }
 }
 
 enum VexxEvent: String { case on, off, error, gate }
@@ -133,6 +143,7 @@ final class VexxEngine: ObservableObject {
     @Published private(set) var active: Set<UUID> = []
     @Published var busyID: UUID?
     @Published var error: String?
+    @Published var seedLog: [String] = []
 
     func refresh(_ items: [PatchLibraryItem]) {
         active = Set(items.filter { DevicePatchService.latestReceipt(projectID: $0.id) != nil }.map(\.id))
@@ -291,6 +302,7 @@ struct VexxRoot: View {
     @StateObject private var engine = VexxEngine()
     @State private var input = ""
     @State private var appeared = false
+    @State private var glow = false
 
     var body: some View {
         Group {
@@ -314,10 +326,10 @@ struct VexxRoot: View {
                 .ignoresSafeArea()
 
             RadialGradient(
-                colors: [VexxTheme.accent.opacity(0.26), .clear],
+                colors: [Color.white.opacity(glow ? 0.16 : 0.06), .clear],
                 center: .top,
                 startRadius: 10,
-                endRadius: 360
+                endRadius: glow ? 420 : 300
             )
             .ignoresSafeArea()
 
@@ -325,50 +337,47 @@ struct VexxRoot: View {
                 Spacer()
 
                 Text("VEEX")
-                    .font(.system(size: 64, weight: .black))
-                    .tracking(11)
+                    .font(.system(size: 66, weight: .black))
+                    .tracking(12)
                     .foregroundStyle(
                         LinearGradient(
-                            colors: [VexxTheme.accentHi, VexxTheme.accent],
+                            colors: [VexxTheme.accentHi, Color(white: 0.55)],
                             startPoint: .top,
                             endPoint: .bottom
                         )
                     )
-                    .shadow(color: VexxTheme.accent.opacity(0.6), radius: 26)
-                    .scaleEffect(appeared ? 1 : 0.92)
+                    .shadow(color: .white.opacity(glow ? 0.5 : 0.15), radius: glow ? 32 : 12)
+                    .scaleEffect(appeared ? 1 : 0.9)
                     .opacity(appeared ? 1 : 0)
 
                 Text("BY LEVI")
                     .font(.system(size: 12, weight: .bold))
-                    .tracking(6)
-                    .foregroundStyle(.white.opacity(0.42))
-                    .padding(.top, 9)
+                    .tracking(7)
+                    .foregroundStyle(.white.opacity(0.38))
+                    .padding(.top, 10)
                     .opacity(appeared ? 1 : 0)
 
-                Spacer().frame(height: 48)
+                Spacer().frame(height: 46)
 
                 HStack(spacing: 10) {
                     Image(systemName: "key.fill")
                         .font(.footnote)
-                        .foregroundStyle(VexxTheme.accent.opacity(0.85))
+                        .foregroundStyle(.white.opacity(0.7))
                     TextField("VEEX-XXXX-XXX", text: $input)
                         .textInputAutocapitalization(.characters)
                         .autocorrectionDisabled()
                         .font(.system(.subheadline, design: .monospaced))
                         .foregroundStyle(.white)
-                        .tint(VexxTheme.accent)
+                        .tint(.white)
                 }
                 .padding(.horizontal, 18)
                 .frame(height: 56)
                 .background(VexxTheme.card, in: .rect(cornerRadius: 18))
                 .overlay(
                     RoundedRectangle(cornerRadius: 18)
-                        .stroke(
-                            input.isEmpty ? VexxTheme.stroke : VexxTheme.accent.opacity(0.75),
-                            lineWidth: 1
-                        )
+                        .stroke(input.isEmpty ? VexxTheme.stroke : .white.opacity(0.8), lineWidth: 1)
                 )
-                .shadow(color: input.isEmpty ? .clear : VexxTheme.accent.opacity(0.35), radius: 14)
+                .shadow(color: input.isEmpty ? .clear : .white.opacity(0.25), radius: 16)
                 .animation(VexxTheme.spring, value: input.isEmpty)
 
                 HStack(spacing: 7) {
@@ -392,32 +401,44 @@ struct VexxRoot: View {
                 }
 
                 Button {
+                    if input.isEmpty { license.error = "Escribe tu key"; return }
+                    guard appState.isSupported else {
+                        license.error = "Este iOS no está soportado"
+                        return
+                    }
                     license.activate(input)
                     if license.isValid { VexxVoice.play(.gate) }
                 } label: {
                     Text("Continuar")
                         .font(.subheadline.weight(.bold))
+                        .foregroundStyle(VexxTheme.bgBottom)
                         .frame(maxWidth: .infinity)
                         .frame(height: 54)
+                        .contentShape(Rectangle())
+                        .background(
+                            LinearGradient(
+                                colors: [VexxTheme.accentHi, VexxTheme.accent],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            ),
+                            in: .rect(cornerRadius: 18)
+                        )
+                        .shadow(color: .white.opacity(glow ? 0.4 : 0.2), radius: glow ? 22 : 12)
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(VexxTheme.bgBottom)
-                .background(
-                    LinearGradient(
-                        colors: [VexxTheme.accentHi, VexxTheme.accent],
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    ),
-                    in: .rect(cornerRadius: 18)
-                )
-                .shadow(color: VexxTheme.accent.opacity(0.45), radius: 18)
-                .disabled(!appState.isSupported || input.isEmpty)
-                .opacity(!appState.isSupported || input.isEmpty ? 0.45 : 1)
-                .scaleEffect(input.isEmpty ? 0.99 : 1)
-                .animation(VexxTheme.spring, value: input.isEmpty)
-                .padding(.top, 28)
+                .buttonStyle(VexxPressStyle())
+                .padding(.top, 26)
 
                 Spacer()
+
+                Text("SOPORTADO")
+                    .font(.system(size: 8, weight: .bold))
+                    .tracking(3)
+                    .foregroundStyle(.white.opacity(0.22))
+                Text(VexxTheme.supportedList)
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.32))
+                    .multilineTextAlignment(.center)
+                    .padding(.top, 3)
 
                 HStack(spacing: 22) {
                     Link(destination: URL(string: "https://t.me/levibrouh")!) {
@@ -428,8 +449,9 @@ struct VexxRoot: View {
                     }
                 }
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(VexxTheme.accent.opacity(0.85))
-                .padding(.bottom, 18)
+                .foregroundStyle(.white.opacity(0.55))
+                .padding(.top, 16)
+                .padding(.bottom, 16)
                 .opacity(appeared ? 1 : 0)
             }
             .padding(.horizontal, 30)
@@ -437,6 +459,7 @@ struct VexxRoot: View {
         .task {
             appState.detectSupport()
             withAnimation(.easeOut(duration: 0.55)) { appeared = true }
+            withAnimation(.easeInOut(duration: 2.4).repeatForever(autoreverses: true)) { glow = true }
         }
     }
 }
@@ -478,20 +501,21 @@ struct VexxMain: View {
                             Text("ABRIR FREE FIRE")
                         }
                         .font(.subheadline.weight(.bold))
+                        .foregroundStyle(VexxTheme.bgBottom)
                         .frame(maxWidth: .infinity)
                         .frame(height: 56)
+                        .contentShape(Rectangle())
+                        .background(
+                            LinearGradient(
+                                colors: [VexxTheme.accentHi, VexxTheme.accent],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            ),
+                            in: .rect(cornerRadius: 18)
+                        )
+                        .shadow(color: .white.opacity(0.25), radius: 14)
                     }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(VexxTheme.bgBottom)
-                    .background(
-                        LinearGradient(
-                            colors: [VexxTheme.accentHi, VexxTheme.accent],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        ),
-                        in: .rect(cornerRadius: 18)
-                    )
-                    .shadow(color: VexxTheme.accent.opacity(0.45), radius: 18)
+                    .buttonStyle(VexxPressStyle())
                     .padding(.horizontal)
                     .padding(.bottom, 10)
                 }
@@ -501,11 +525,11 @@ struct VexxMain: View {
             .toolbar {
                 Button { showSettings = true } label: {
                     Image(systemName: "gearshape.fill")
-                        .foregroundStyle(VexxTheme.accent)
+                        .foregroundStyle(.white.opacity(0.8))
                 }
             }
             .sheet(isPresented: $showSettings) {
-                VexxSettings(license: license)
+                VexxSettings(engine: engine, license: license)
             }
             .task {
                 engine.refresh(store.items)
@@ -529,8 +553,19 @@ struct VexxMain: View {
             while store.isBusy { try? await Task.sleep(nanoseconds: 300_000_000) }
             if let data = try? Data(contentsOf: url) {
                 _ = store.importPackage(data: data, password: VexxCatalog.password)
+            } else {
+                engine.seedLog.append("\(name): no se pudo leer")
+                continue
             }
-            try? await Task.sleep(nanoseconds: 500_000_000)
+            try? await Task.sleep(nanoseconds: 700_000_000)
+            if let alert = store.alert {
+                engine.seedLog.append("\(name) → \(alert.messageKey) \(alert.messageArgument ?? "")")
+                store.alert = nil
+            }
+            if let unlock = store.unlockErrorKey {
+                engine.seedLog.append("\(name) → unlock \(unlock)")
+                store.clearUnlockError()
+            }
         }
         while store.isBusy { try? await Task.sleep(nanoseconds: 300_000_000) }
         engine.refresh(store.items)
@@ -621,6 +656,7 @@ struct VexxSwitchRow: View {
 
 struct VexxSettings: View {
     @EnvironmentObject private var store: PatchProjectStore
+    @ObservedObject var engine: VexxEngine
     @ObservedObject var license: VexxLicense
     @Environment(\.dismiss) private var dismiss
     @State private var copied = false
@@ -666,6 +702,18 @@ struct VexxSettings: View {
                     }
                 } header: {
                     Text("Depuración")
+                }
+
+                if !engine.seedLog.isEmpty {
+                    Section {
+                        ForEach(engine.seedLog, id: \.self) { line in
+                            Text(line)
+                                .font(.caption2.monospaced())
+                                .foregroundStyle(.orange)
+                        }
+                    } header: {
+                        Text("Errores de importado")
+                    }
                 }
 
                 Section {
