@@ -43,6 +43,11 @@
     <array>
         <string>UIInterfaceOrientationPortrait</string>
     </array>
+    <key>LSApplicationQueriesSchemes</key>
+    <array>
+        <string>freefire</string>
+        <string>freefiremax</string>
+    </array>
     <key>MinimumOSVersion</key>
     <string>16.0</string>
 </dict>
