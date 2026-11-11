@@ -217,28 +217,19 @@ final class VexxEngine: ObservableObject {
                 }
 
                 if row.tab == .aimbots {
-                    let stale = await MainActor.run {
+                    let others = await MainActor.run {
                         VexxCatalog.rows
                             .filter { $0.tab == .aimbots && $0.id != row.id }
                             .compactMap { map[$0.id] }
+                            .filter { self.active.contains($0.id) }
                     }
-                    for other in stale {
-                        if await MainActor.run(body: { self.active.contains(other.id) }) {
-                            try? Self.restoreOne(other)
-                            await MainActor.run { _ = self.active.remove(other.id) }
-                        }
-                        await MainActor.run { store.delete(other) }
-                        try? await Task.sleep(nanoseconds: 350_000_000)
+                    for other in others {
+                        try? Self.restoreOne(other)
+                        await MainActor.run { _ = self.active.remove(other.id) }
                     }
                 }
 
-                var target: PatchLibraryItem?
-
-                if row.tab == .aimbots {
-                    target = nil
-                } else {
-                    target = map[row.id]
-                }
+                var target = map[row.id]
 
                 if target == nil {
                     try await Self.importBundled(row: row, store: store)
@@ -277,19 +268,24 @@ final class VexxEngine: ObservableObject {
             throw VexxError.notBundled
         }
 
-        await MainActor.run {
-            _ = store.importPackage(data: data, password: VexxCatalog.password)
-        }
-
-        for _ in 0..<24 {
-            try? await Task.sleep(nanoseconds: 250_000_000)
-            let done = await MainActor.run {
-                !store.isBusy && VexxMatch.assignment(
-                    rows: VexxCatalog.rows,
-                    items: store.items
-                )[row.id] != nil
+        for attempt in 0..<3 {
+            await MainActor.run {
+                _ = store.importPackage(data: data, password: VexxCatalog.password)
             }
-            if done { return }
+            for _ in 0..<20 {
+                try? await Task.sleep(nanoseconds: 250_000_000)
+                let done = await MainActor.run {
+                    !store.isBusy && VexxMatch.assignment(
+                        rows: VexxCatalog.rows,
+                        items: store.items
+                    )[row.id] != nil
+                }
+                if done { return }
+            }
+            if attempt < 2 {
+                await MainActor.run { store.alert = nil }
+                try? await Task.sleep(nanoseconds: 800_000_000)
+            }
         }
         throw VexxError.importFailed
     }
@@ -320,7 +316,6 @@ final class VexxLicense: ObservableObject {
     @Published private(set) var storedKey: String = ""
 
     static let masterKeys = ["VEEX-LEVI-2004", "VEEX-LEVI-FF26"]
-    static let ownerID   = "2BC18D89"
     static let secret    = "VEEX-3105-LEVI"
     private let alpha = Array("ABCDEFGHJKLMNPQRSTUVWXYZ23456789")
     private let epoch = Date(timeIntervalSince1970: 1_767_225_600)
@@ -356,12 +351,12 @@ final class VexxLicense: ObservableObject {
 
     func activate(_ raw: String) {
         let c = norm(raw)
+
         if Self.masterKeys.contains(where: { norm($0) == c }) {
-            if Self.ownerID == "REEMPLAZA" || Self.ownerID == Self.deviceID {
-                grant(nil, key: raw.uppercased())
-            } else { error = "Esta key es de otro dispositivo" }
+            grant(nil, key: raw.uppercased())
             return
         }
+
         guard c.count == 11, c.hasPrefix("VEEX") else { error = "Formato inválido"; return }
         let body = String(c.dropFirst(4))
         let expPart = String(body.prefix(4))
@@ -738,7 +733,8 @@ struct VexxSettings: View {
                     HStack {
                         Label("Dispositivos", systemImage: "iphone")
                         Spacer()
-                        Text("1 · este iPhone").foregroundStyle(.secondary)
+                        Text(license.expiry == nil ? "Ilimitados" : "1 · este iPhone")
+                            .foregroundStyle(.secondary)
                     }
                     Button {
                         UIPasteboard.general.string = license.storedKey
