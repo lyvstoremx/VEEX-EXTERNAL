@@ -62,6 +62,29 @@ enum VexxCatalog {
     }
 
     static var aimbots: [VexxRow] { rows.filter { $0.tab == .aimbots } }
+
+    static var reserved: Set<String> {
+        var s = Set<String>()
+        for r in rows {
+            s.insert(norm(r.pkg))
+            s.insert(norm(r.title))
+        }
+        return s
+    }
+}
+
+// MARK: - Tema
+enum VexxTheme {
+    static var metal: LinearGradient {
+        LinearGradient(
+            colors: [.white, Color(white: 0.62), Color(white: 0.95), Color(white: 0.70)],
+            startPoint: .top,
+            endPoint: .bottom
+        )
+    }
+    static var card: Color { Color.white.opacity(0.055) }
+    static var stroke: Color { Color.white.opacity(0.13) }
+    static var dim: Color { Color.white.opacity(0.42) }
 }
 
 // MARK: - Licencia
@@ -201,6 +224,8 @@ enum VexxSupport {
         let major = ProcessInfo.processInfo.operatingSystemVersion.majorVersion
         return major >= 16 && major <= 27
     }
+
+    static let ranges = "iOS 17.0–17.7 · 18.0–18.7.1 · 26.0–26.6.1 · 27 betas 1–4"
 }
 
 // MARK: - Raíz
@@ -229,73 +254,120 @@ struct VexxGate: View {
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
-            VStack(spacing: 22) {
-                Spacer()
+
+            RadialGradient(
+                colors: [.white.opacity(0.10), .clear],
+                center: .top,
+                startRadius: 40,
+                endRadius: 420
+            )
+            .ignoresSafeArea()
+
+            VStack(spacing: 0) {
+                Spacer().frame(height: 70)
+
                 Text("VEEX")
-                    .font(.system(size: 54, weight: .black, design: .rounded))
-                    .tracking(6)
-                    .foregroundStyle(.white)
-                    .scaleEffect(appeared ? 1 : 0.85)
+                    .font(.system(size: 76, weight: .black))
+                    .tracking(10)
+                    .foregroundStyle(VexxTheme.metal)
+                    .shadow(color: .white.opacity(0.30), radius: 26)
+                    .scaleEffect(appeared ? 1 : 0.9)
                     .opacity(appeared ? 1 : 0)
+
+                Text("BY LEVI")
+                    .font(.system(size: 13, weight: .semibold))
+                    .tracking(9)
+                    .foregroundStyle(VexxTheme.dim)
+                    .padding(.top, 14)
+                    .opacity(appeared ? 1 : 0)
+
+                Spacer().frame(height: 54)
+
+                HStack(spacing: 11) {
+                    Image(systemName: "key.fill")
+                        .font(.system(size: 15))
+                        .foregroundStyle(VexxTheme.dim)
+                    TextField("VEEX-XXXX-XXX", text: $input)
+                        .textInputAutocapitalization(.characters)
+                        .autocorrectionDisabled()
+                        .font(.system(size: 17, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.white)
+                }
+                .padding(.horizontal, 22)
+                .padding(.vertical, 22)
+                .background(VexxTheme.card, in: RoundedRectangle(cornerRadius: 24))
+                .overlay(RoundedRectangle(cornerRadius: 24).stroke(VexxTheme.stroke))
+                .padding(.horizontal, 26)
 
                 HStack(spacing: 7) {
                     Circle()
                         .fill(VexxSupport.isSupported ? .green : .red)
-                        .frame(width: 8, height: 8)
-                    Text(VexxSupport.isSupported ? "Soportado" : "No soportado")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(VexxSupport.isSupported ? .green : .red)
+                        .frame(width: 7, height: 7)
+                    Text("iOS \(UIDevice.current.systemVersion) \(VexxSupport.isSupported ? "soportado" : "no soportado")")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.62))
                 }
-                .opacity(appeared ? 1 : 0)
+                .padding(.top, 16)
 
-                VStack(spacing: 12) {
-                    TextField("VEEX-XXXX-XXXX", text: $input)
-                        .textInputAutocapitalization(.characters)
-                        .autocorrectionDisabled()
-                        .font(.system(size: 15, weight: .semibold, design: .monospaced))
-                        .multilineTextAlignment(.center)
-                        .padding(.vertical, 14)
-                        .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 14))
-
-                    if let m = license.message {
-                        Text(m)
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(.red)
-                    }
-
-                    Button {
-                        if license.activate(input) { VexxAudio.shared.play("on") }
-                    } label: {
-                        Text("Continuar")
-                            .font(.system(size: 16, weight: .bold))
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 15)
-                            .background(Color.white, in: RoundedRectangle(cornerRadius: 14))
-                            .foregroundStyle(.black)
-                    }
-                    .buttonStyle(.plain)
-                    .scaleEffect(appeared ? 1 : 0.95)
+                if let m = license.message {
+                    Text(m)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.red)
+                        .padding(.top, 10)
                 }
+
+                Button {
+                    if license.activate(input) { VexxAudio.shared.play("on") }
+                } label: {
+                    Text("Continuar")
+                        .font(.system(size: 20, weight: .bold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 24)
+                        .background(Color.white, in: RoundedRectangle(cornerRadius: 28))
+                        .foregroundStyle(.black)
+                        .shadow(color: .white.opacity(0.35), radius: 24, y: 8)
+                }
+                .buttonStyle(.plain)
                 .padding(.horizontal, 26)
+                .padding(.top, 26)
+                .scaleEffect(appeared ? 1 : 0.96)
+                .opacity(appeared ? 1 : 0)
 
                 Spacer()
 
-                VStack(spacing: 8) {
-                    Text("Levi")
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(.white.opacity(0.5))
-                    HStack(spacing: 16) {
-                        Link("Canal", destination: URL(string: "https://t.me/levibrouhs")!)
-                        Link("Telegram", destination: URL(string: "https://t.me/levibrouh")!)
+                VStack(spacing: 10) {
+                    Text("SOPORTADO")
+                        .font(.system(size: 11, weight: .semibold))
+                        .tracking(5)
+                        .foregroundStyle(VexxTheme.dim)
+                    Text(VexxSupport.ranges)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(VexxTheme.dim)
+                        .multilineTextAlignment(.center)
+
+                    HStack(spacing: 26) {
+                        Link(destination: URL(string: "https://t.me/levibrouh")!) {
+                            HStack(spacing: 7) {
+                                Image(systemName: "paperplane.fill")
+                                Text("levibrouh")
+                            }
+                        }
+                        Link(destination: URL(string: "https://t.me/levibrouhs")!) {
+                            HStack(spacing: 7) {
+                                Image(systemName: "megaphone.fill")
+                                Text("Canal")
+                            }
+                        }
                     }
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.75))
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.88))
+                    .padding(.top, 14)
                 }
-                .padding(.bottom, 26)
+                .padding(.bottom, 30)
             }
         }
         .onAppear {
-            withAnimation(.spring(response: 0.6, dampingFraction: 0.8)) { appeared = true }
+            withAnimation(.easeOut(duration: 0.7)) { appeared = true }
         }
     }
 }
@@ -317,71 +389,86 @@ struct VexxMain: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                header
-                if let error {
-                    HStack(alignment: .top, spacing: 8) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .font(.system(size: 11))
-                        Text(error)
-                            .font(.system(size: 11, weight: .medium))
-                            .lineLimit(8)
-                        Spacer(minLength: 0)
+            ZStack {
+                Color.black.ignoresSafeArea()
+
+                RadialGradient(
+                    colors: [.white.opacity(0.07), .clear],
+                    center: .top,
+                    startRadius: 20,
+                    endRadius: 340
+                )
+                .ignoresSafeArea()
+
+                VStack(spacing: 0) {
+                    header
+
+                    if let error {
+                        HStack(alignment: .top, spacing: 8) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .font(.system(size: 11))
+                            Text(error)
+                                .font(.system(size: 11, weight: .medium))
+                                .lineLimit(8)
+                            Spacer(minLength: 0)
+                        }
+                        .foregroundStyle(.red)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .background(Color.red.opacity(0.12))
+                        .transition(.move(edge: .top).combined(with: .opacity))
                     }
-                    .foregroundStyle(.red)
+
+                    Picker("", selection: $tab) {
+                        ForEach(VexxTab.allCases) { Text($0.rawValue).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
                     .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-                    .background(Color.red.opacity(0.12))
-                    .transition(.move(edge: .top).combined(with: .opacity))
-                }
+                    .padding(.bottom, 12)
 
-                Picker("", selection: $tab) {
-                    ForEach(VexxTab.allCases) { Text($0.rawValue).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                .padding(.horizontal, 16)
-                .padding(.bottom, 10)
-
-                List {
-                    ForEach(rows) { row in
-                        rowView(row)
+                    ScrollView {
+                        VStack(spacing: 9) {
+                            ForEach(rows) { row in
+                                rowView(row)
+                            }
+                        }
+                        .padding(.horizontal, 16)
                     }
-                }
-                .listStyle(.plain)
-                .scrollContentBackground(.hidden)
 
-                Button { openFF() } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "gamecontroller.fill").font(.system(size: 12))
-                        Text("Abrir Free Fire").font(.system(size: 13, weight: .bold))
+                    Button { openFF() } label: {
+                        HStack(spacing: 7) {
+                            Image(systemName: "gamecontroller.fill").font(.system(size: 13))
+                            Text("Abrir Free Fire").font(.system(size: 15, weight: .bold))
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 17)
+                        .background(Color.white, in: RoundedRectangle(cornerRadius: 20))
+                        .foregroundStyle(.black)
+                        .shadow(color: .white.opacity(0.22), radius: 18, y: 6)
                     }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-                    .background(Color.white, in: RoundedRectangle(cornerRadius: 13))
-                    .foregroundStyle(.black)
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 14)
                 }
-                .buttonStyle(.plain)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
             }
-            .background(Color.black.ignoresSafeArea())
             .task { sync() }
             .sheet(isPresented: $showSettings) { VexxSettings(license: license) }
         }
     }
 
     private var header: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 2) {
+        HStack(alignment: .center) {
+            VStack(alignment: .leading, spacing: 3) {
                 Text("VEEX EXTERNAL")
-                    .font(.system(size: 17, weight: .black))
-                    .tracking(1)
-                    .foregroundStyle(.white)
+                    .font(.system(size: 19, weight: .black))
+                    .tracking(2)
+                    .foregroundStyle(VexxTheme.metal)
+                    .shadow(color: .white.opacity(0.22), radius: 10)
                 HStack(spacing: 5) {
                     Circle()
                         .fill(VexxSupport.isSupported ? .green : .red)
                         .frame(width: 6, height: 6)
-                    Text(VexxSupport.isSupported ? "Soportado" : "No soportado")
+                    Text(VexxSupport.isSupported ? "soportado" : "no soportado")
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(VexxSupport.isSupported ? .green : .red)
                 }
@@ -391,11 +478,15 @@ struct VexxMain: View {
                 Image(systemName: "gearshape.fill")
                     .font(.system(size: 17))
                     .foregroundStyle(.white.opacity(0.85))
+                    .padding(9)
+                    .background(VexxTheme.card, in: Circle())
+                    .overlay(Circle().stroke(VexxTheme.stroke))
             }
+            .buttonStyle(.plain)
         }
         .padding(.horizontal, 16)
-        .padding(.top, 8)
-        .padding(.bottom, 10)
+        .padding(.top, 10)
+        .padding(.bottom, 12)
     }
 
     private func rowView(_ row: VexxRow) -> some View {
@@ -409,17 +500,15 @@ struct VexxMain: View {
             if working {
                 ProgressView().tint(.white).scaleEffect(0.8)
             } else {
-                Toggle("", isOn: Binding(
-                    get: { active },
-                    set: { _ in toggle(row) }
-                ))
-                .labelsHidden()
-                .tint(active ? .green : .red)
+                Toggle("", isOn: Binding(get: { active }, set: { _ in toggle(row) }))
+                    .labelsHidden()
+                    .tint(active ? .green : .red)
             }
         }
-        .padding(.vertical, 4)
-        .listRowBackground(Color.white.opacity(0.05))
-        .listRowSeparatorTint(.white.opacity(0.08))
+        .padding(.horizontal, 16)
+        .padding(.vertical, 15)
+        .background(VexxTheme.card, in: RoundedRectangle(cornerRadius: 18))
+        .overlay(RoundedRectangle(cornerRadius: 18).stroke(VexxTheme.stroke))
     }
 
     // MARK: Lógica
@@ -429,22 +518,20 @@ struct VexxMain: View {
         UserDefaults.standard.set(id.uuidString, forKey: cacheKey(r))
     }
 
-    private func score(_ name: String, _ r: VexxRow) -> Int {
+    private func exact(_ name: String, _ r: VexxRow) -> Bool {
         let n = VexxCatalog.norm(name)
-        guard !n.isEmpty else { return 0 }
+        return !n.isEmpty && (n == VexxCatalog.norm(r.pkg) || n == VexxCatalog.norm(r.title))
+    }
+
+    private func loose(_ name: String, _ r: VexxRow) -> Bool {
+        let n = VexxCatalog.norm(name)
+        guard !n.isEmpty else { return false }
         let keys = [VexxCatalog.norm(r.pkg), VexxCatalog.norm(r.title)]
-        var best = 0
-        for (i, k) in keys.enumerated() where !k.isEmpty {
-            let w = i == 0 ? 10 : 6
-            if n == k {
-                best = max(best, 100 * w)
-            } else if n.hasPrefix(k) || k.hasPrefix(n) {
-                best = max(best, 70 * w)
-            } else if n.contains(k) || k.contains(n) {
-                best = max(best, 50 * w)
-            }
+        for k in keys where !k.isEmpty {
+            if n.hasPrefix(k) || k.hasPrefix(n) { return true }
+            if n.contains(k) || k.contains(n) { return true }
         }
-        return best
+        return false
     }
 
     private func availablePackages() -> [URL] {
@@ -468,12 +555,14 @@ struct VexxMain: View {
     }
 
     private func packageURL(_ r: VexxRow) -> URL? {
-        var best: (URL, Int)?
-        for url in availablePackages() {
-            let s = score(url.deletingPathExtension().lastPathComponent, r)
-            if s > 0, s > (best?.1 ?? 0) { best = (url, s) }
-        }
-        return best?.0
+        let all = availablePackages()
+        let names = { (u: URL) in u.deletingPathExtension().lastPathComponent }
+
+        if let hit = all.first(where: { exact(names($0), r) }) { return hit }
+
+        let reserved = VexxCatalog.reserved
+        let others = all.filter { !reserved.contains(VexxCatalog.norm(names($0))) }
+        return others.first(where: { loose(names($0), r) })
     }
 
     private func findItem(_ r: VexxRow) -> PatchLibraryItem? {
@@ -482,12 +571,15 @@ struct VexxMain: View {
            let hit = store.items.first(where: { $0.id == id }) {
             return hit
         }
-        var best: (PatchLibraryItem, Int)?
-        for item in store.items {
-            let s = score(item.project?.name ?? "", r)
-            if s >= 500, s > (best?.1 ?? 0) { best = (item, s) }
+        if let hit = store.items.first(where: { exact($0.project?.name ?? "", r) }) {
+            cache(hit.id, r)
+            return hit
         }
-        if let hit = best?.0 {
+        let reserved = VexxCatalog.reserved
+        if let hit = store.items.first(where: {
+            let n = VexxCatalog.norm($0.project?.name ?? "")
+            return !n.isEmpty && !reserved.contains(n) && loose(n, r)
+        }) {
             cache(hit.id, r)
             return hit
         }
@@ -644,38 +736,40 @@ struct VexxSettings: View {
 
     var body: some View {
         NavigationStack {
-            List {
-                Section {
-                    LabeledContent("Estado") {
-                        Text(license.master ? "Permanente" : license.remaining)
-                            .foregroundStyle(license.master ? .green : .white)
+            ZStack {
+                Color.black.ignoresSafeArea()
+                List {
+                    Section {
+                        LabeledContent("Estado") {
+                            Text(license.master ? "Permanente" : license.remaining)
+                                .foregroundStyle(license.master ? .green : .white)
+                        }
+                        LabeledContent("Dispositivos") {
+                            Text(license.master ? "Ilimitados" : "\(license.devices)")
+                        }
+                        LabeledContent("iOS") {
+                            Text(ProcessInfo.processInfo.operatingSystemVersionString)
+                        }
+                    } header: {
+                        Text("Licencia")
                     }
-                    LabeledContent("Dispositivos") {
-                        Text(license.master ? "Ilimitados" : "\(license.devices)")
-                    }
-                    LabeledContent("iOS") {
-                        Text(ProcessInfo.processInfo.operatingSystemVersionString)
-                    }
-                } header: {
-                    Text("Licencia")
-                }
 
-                Section {
-                    Link("Telegram", destination: URL(string: "https://t.me/levibrouh")!)
-                    Link("Canal", destination: URL(string: "https://t.me/levibrouhs")!)
-                } header: {
-                    Text("Levi")
-                }
+                    Section {
+                        Link("Telegram", destination: URL(string: "https://t.me/levibrouh")!)
+                        Link("Canal", destination: URL(string: "https://t.me/levibrouhs")!)
+                    } header: {
+                        Text("Levi")
+                    }
 
-                Section {
-                    Button("Borrar key", role: .destructive) {
-                        license.forget()
-                        dismiss()
+                    Section {
+                        Button("Borrar key", role: .destructive) {
+                            license.forget()
+                            dismiss()
+                        }
                     }
                 }
+                .scrollContentBackground(.hidden)
             }
-            .scrollContentBackground(.hidden)
-            .background(Color.black.ignoresSafeArea())
             .navigationTitle("Ajustes")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
