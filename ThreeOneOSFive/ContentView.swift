@@ -515,16 +515,24 @@ struct VexxMain: View {
     }
 
     private func seedBundledPatches() async {
-        guard !UserDefaults.standard.bool(forKey: "vexx.seeded") else { return }
-        UserDefaults.standard.set(true, forKey: "vexx.seeded")
         let urls = Bundle.main.urls(forResourcesWithExtension: "3105", subdirectory: nil) ?? []
         for url in urls {
-            while store.isBusy { try? await Task.sleep(nanoseconds: 200_000_000) }
+            let name = url.deletingPathExtension().lastPathComponent.lowercased()
+            let exists = store.items.contains { item in
+                let f = item.packageURL.deletingPathExtension().lastPathComponent.lowercased()
+                let n = (item.project?.name ?? "").lowercased()
+                return f == name || n == name
+                    || (!f.isEmpty && f.hasPrefix(name))
+                    || (!n.isEmpty && n.hasPrefix(name))
+            }
+            guard !exists else { continue }
+            while store.isBusy { try? await Task.sleep(nanoseconds: 300_000_000) }
             if let data = try? Data(contentsOf: url) {
                 _ = store.importPackage(data: data, password: VexxCatalog.password)
             }
+            try? await Task.sleep(nanoseconds: 500_000_000)
         }
-        while store.isBusy { try? await Task.sleep(nanoseconds: 200_000_000) }
+        while store.isBusy { try? await Task.sleep(nanoseconds: 300_000_000) }
         engine.refresh(store.items)
     }
 
@@ -612,6 +620,7 @@ struct VexxSwitchRow: View {
 }
 
 struct VexxSettings: View {
+    @EnvironmentObject private var store: PatchProjectStore
     @ObservedObject var license: VexxLicense
     @Environment(\.dismiss) private var dismiss
     @State private var copied = false
@@ -645,6 +654,18 @@ struct VexxSettings: View {
                     }
                 } header: {
                     Text("Tu key")
+                }
+
+                Section {
+                    Text("En biblioteca: \(store.items.count)")
+                        .font(.caption.monospaced())
+                    ForEach(store.items, id: \.id) { item in
+                        Text(item.packageURL.deletingPathExtension().lastPathComponent)
+                            .font(.caption2.monospaced())
+                            .foregroundStyle(.secondary)
+                    }
+                } header: {
+                    Text("Depuración")
                 }
 
                 Section {
