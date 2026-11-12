@@ -380,6 +380,8 @@ jobs:
           PY
 
       - name: Verificar paquete
+        env:
+          P3105: "Levi-externas-veex-6393*#%"
         run: |
           python tools/decrypt3105.py "holo_personaje_LEVI.3105" work2
           ls -l work2/blobs
