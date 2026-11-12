@@ -9,27 +9,53 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install cryptography UnityPy pillow
+      - run: pip install cryptography UnityPy pillow lz4
       - name: Descifrar
         env:
           P3105: 'Levi-externas-veex-6393*#%'
         run: python tools/decrypt3105.py patches/holo_personaje.3105 out
-      - name: Regla completa
+      - name: Diagnostico
         run: |
           python - <<'PY'
-          import json, plistlib, pathlib
-          pl = plistlib.loads(pathlib.Path("out/payload.bplist").read_bytes())
-          for r in pl["project"]["rules"]:
-              print("RULE", json.dumps(r, default=lambda b: f"<{len(b)}B>"))
+          import pathlib, zlib, gzip, lz4.block
+          for f in sorted(pathlib.Path("out/blobs").glob("*.bin")):
+              d = f.read_bytes()
+              print("FILE", f.name, len(d), "B")
+              print("HEX", d[:64].hex())
+              print("ASCII", d[:64])
+              for n, fn in (("zlib", lambda: zlib.decompress(d)),
+                            ("gzip", lambda: gzip.decompress(d))):
+                  try: print(n, "OK", len(fn()))
+                  except Exception as e: print(n, "FAIL", type(e).__name__)
+              try: print("lz4 OK", len(lz4.block.decompress(d, uncompressed_size=len(d)*32)))
+              except Exception as e: print("lz4 FAIL", type(e).__name__)
           PY
       - name: Inspeccionar bundle
         run: |
           python - <<'PY'
-          import pathlib, json, UnityPy
+          import pathlib, json, lz4.block, UnityPy
+          from UnityPy.enums.BundleFile import CompressionFlags
+          from UnityPy.helpers import CompressionHelper
+
+          def tolerante(data, size):
+              for m in (1, 2, 4, 8, 16, 32, 64):
+                  try:
+                      return lz4.block.decompress(data, uncompressed_size=size * m)
+                  except Exception:
+                      pass
+              raise RuntimeError("lz4 no descomprime ni con buffer grande")
+
+          for flag in (CompressionFlags.LZ4, CompressionFlags.LZ4HC):
+              try: CompressionHelper.DECOMPRESSION_MAP[flag] = tolerante
+              except Exception: pass
+
           out = pathlib.Path("out/tex"); out.mkdir(parents=True, exist_ok=True)
           for f in sorted(pathlib.Path("out/blobs").glob("*.bin")):
-              print("== ", f.name, f.stat().st_size, "B  magic:", f.read_bytes()[:16].hex())
-              env = UnityPy.load(str(f))
+              print("== ", f.name)
+              try:
+                  env = UnityPy.load(str(f))
+              except Exception as e:
+                  print("LOAD FAIL", type(e).__name__, e); continue
               for obj in env.objects:
                   row = {"t": obj.type.name}
                   try: row["name"] = obj.peek_name()
