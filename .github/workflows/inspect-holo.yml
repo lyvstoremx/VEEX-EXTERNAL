@@ -95,6 +95,9 @@ jobs:
           SRC = glob.glob("work/*.bundle")[0]
           OUT = "work/holo_new.bundle"
 
+          NUM = ("m_TypeFlags", "m_Index", "m_MetaFlag", "m_ByteSize", "m_Version",
+                 "m_Level", "m_RefTypeHash", "m_VariableCount")
+
           def log(*a):
               s = " ".join(str(x) for x in a)
               print(s)
@@ -201,21 +204,20 @@ jobs:
                   log("sin SerializedFile con materiales")
                   return 1
 
+              log("header version", sf.header.version, "unity", sf.unity_version)
+
               node = get_typetree_node(ClassIDType.Texture2D, sf.version)
+              faltan = set()
               for n in node.traverse():
-                  if n.m_TypeFlags is None:
-                      n.m_TypeFlags = 0
-                  if n.m_Index is None:
-                      n.m_Index = 0
-                  if n.m_MetaFlag is None:
-                      n.m_MetaFlag = 0
-                  if n.m_ByteSize is None:
-                      n.m_ByteSize = 0
-                  if n.m_Version is None:
-                      n.m_Version = 1
-                  if n.m_Level is None:
-                      n.m_Level = 0
-              log("nodos normalizados")
+                  for k in NUM:
+                      if getattr(n, k, None) is None:
+                          faltan.add(k)
+                          try:
+                              setattr(n, k, 0)
+                          except Exception as e:
+                          # campos no declarados en esta version
+                              pass
+              log("normalizados:", sorted(faltan))
 
               d = {}
               fill(node, d, pixels)
