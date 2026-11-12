@@ -18,7 +18,7 @@ jobs:
       - name: Inyectar textura
         run: |
           python - <<'PY'
-          import pathlib, json, math, lz4.block, UnityPy
+          import pathlib, lz4.block, UnityPy
           from PIL import Image, ImageDraw, ImageFont
           from UnityPy.enums import ClassIDType
           from UnityPy.enums.BundleFile import CompressionFlags
@@ -43,29 +43,25 @@ jobs:
           rep = open("out/report.txt", "w")
           out = pathlib.Path("out"); (out / "prev").mkdir(exist_ok=True)
 
-          # --- patron: rejilla de LEVI, rojo sobre negro, inclinada ---
           S = 1024; cel = S // 4
-          base = Image.new("RGB", (S, S), (0, 0, 0))
           capa = Image.new("RGB", (S, S), (0, 0, 0))
           d = ImageDraw.Draw(capa)
-          fnt = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", int(cel * 0.44))
+          fnt = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", int(cel * 0.33))
           for r in range(-1, 5):
               for c in range(-1, 5):
                   d.text((c * cel + cel // 2, r * cel + cel // 2), "LEVI",
                          font=fnt, fill=(255, 30, 30), anchor="mm")
           capa = capa.rotate(15, resample=Image.BICUBIC, fillcolor=(0, 0, 0))
-          base.paste(capa, (0, 0))
-          base.save(out / "prev" / "patron.png")
-
-          raw = base.convert("RGBA").tobytes()
+          capa.save(out / "prev" / "patron.png")
+          raw = capa.convert("RGBA").tobytes()
+          print("raw bytes:", len(raw), file=rep)
 
           def blank(node):
               if node.m_Children:
                   return {c.m_Name: blank(c) for c in node.m_Children}
-              t = node.m_Type
-              if t in ("float", "double"):
+              if node.m_Type in ("float", "double"):
                   return 0.0
-              if t == "string":
+              if node.m_Type == "string":
                   return ""
               return 0
 
@@ -81,6 +77,7 @@ jobs:
                   if not hasattr(sf, "types"):
                       continue
                   node = get_typetree_node(ClassIDType.Texture2D, sf.version)
+                  print("nodos typetree:", len(list(node.traverse())), file=rep)
                   st = SerializedType.__new__(SerializedType)
                   st.__attrs_init__(ClassIDType.Texture2D.value)
                   st.node = node
@@ -92,6 +89,7 @@ jobs:
                   pid = max(sf.objects) + 1
 
                   tree = blank(node)
+                  print("claves tree:", sorted(tree.keys()), file=rep)
                   tree.update({
                       "m_Name": "levi_holo",
                       "m_ForcedFallbackFormat": 4,
@@ -111,10 +109,10 @@ jobs:
                                      ClassIDType.Texture2D.value, ClassIDType.Texture2D,
                                      0, 0, None, None)
                   obj.save_typetree(tree)
+                  print("data serializada:", len(obj.data or b""), file=rep)
                   sf.objects[pid] = obj
-                  print("textura creada", pid, file=rep)
 
-                  for o in sf.objects.values():
+                  for o in list(sf.objects.values()):
                       if o.type.name != "Material":
                           continue
                       m = o.parse_as_dict()
@@ -133,20 +131,34 @@ jobs:
                           if par[0] == "_RimIntensity":
                               par[1] = 3.0
                       o.patch(m)
-                      print("material", m.get("m_Name"), file=rep)
-
-                  data = sf.save(packer="original") if hasattr(sf, "save") else None
+                  print("materiales enganchados", file=rep)
 
               try:
                   salida = env.file.save(packer="original")
-              except Exception:
+              except Exception as e:
+                  print("packer original fallo:", e, file=rep)
                   salida = env.file.save(packer="lz4")
               (out / "holo_nuevo.bin").write_bytes(salida)
               print("bundle nuevo:", len(salida), "B", file=rep)
           rep.close()
           print(open("out/report.txt").read())
           PY
-      - uses: actions/upload-artifact@v4
+      - name: Verificar
+        run: |
+          python - <<'PY'
+          import pathlib, UnityPy
+          env = UnityPy.load(str(pathlib.Path("out/holo_nuevo.bin")))
+          for o in env.objects:
+              if o.type.name == "Texture2D":
+                  t = o.parse_as_dict()
+                  print("TEX", t.get("m_Name"), t.get("m_Width"), t.get("m_Height"),
+                        "bytes:", len(t.get("m_ImageData") or b""))
+              if o.type.name == "Material":
+                  m = o.parse_as_dict()
+                  tex = [x for x in m["m_SavedProperties"]["m_TexEnvs"] if x[0] == "_Tex"]
+                  print("MAT", m.get("m_Name"), tex[0][1]["m_Texture"] if tex else "sin _Tex")
+          PY
+      - uses: actions/upload-artifact:v4
         with:
           name: holo-inyectado
           path: out
