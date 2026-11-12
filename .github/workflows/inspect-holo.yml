@@ -14,7 +14,7 @@ jobs:
         env:
           P3105: 'Levi-externas-veex-6393*#%'
         run: python tools/decrypt3105.py patches/holo_personaje.3105 out
-      - name: Recortar e inspeccionar
+      - name: Volcar materiales
         run: |
           python - <<'PY'
           import pathlib, json, lz4.block, UnityPy
@@ -33,41 +33,29 @@ jobs:
               flag = getattr(CompressionFlags, nombre, None)
               if flag is not None:
                   CompressionHelper.DECOMPRESSION_MAP[flag] = tolerante
-                  print("parcheado", nombre)
 
-          out = pathlib.Path("out/tex"); out.mkdir(parents=True, exist_ok=True)
-          rep = open("out/report.txt", "w")
-
+          rep = open("out/materiales.txt", "w")
           for f in sorted(pathlib.Path("out/blobs").glob("*.bin")):
               d = f.read_bytes()
               i = d.find(b"2018.4.12f1\x00")
               size = int.from_bytes(d[i + 12:i + 20], "big")
-              print("declarado", size, "real", len(d), file=rep)
-              fixed = out.parent / "blob_fixed.bin"
-              fixed.write_bytes(d[:size] if 0 < size < len(d) else d)
-
-              for etiqueta, ruta in (("recortado", fixed), ("original", f)):
-                  try:
-                      env = UnityPy.load(str(ruta))
-                      objs = list(env.objects)
-                      print(etiqueta, "OK objetos:", len(objs), file=rep)
-                      for obj in objs:
-                          row = {"t": obj.type.name}
-                          try: row["name"] = obj.peek_name()
-                          except Exception: pass
-                          if obj.type.name in ("Texture2D", "Sprite"):
-                              t = obj.parse_as_object()
-                              row["w"], row["h"] = t.m_Width, t.m_Height
-                              row["fmt"] = str(getattr(t, "m_TextureFormat", "?"))
-                              t.image.save(out / f"{t.m_Name}.png")
-                          print("OBJ", json.dumps(row, ensure_ascii=False), file=rep)
-                      break
-                  except Exception as e:
-                      print(etiqueta, "FAIL", type(e).__name__, e, file=rep)
+              fijo = pathlib.Path("out/fijo.bin")
+              fijo.write_bytes(d[:size] if 0 < size < len(d) else d)
+              env = UnityPy.load(str(fijo))
+              for obj in env.objects:
+                  if obj.type.name == "Material":
+                      dd = obj.parse_as_dict()
+                      print("=== MATERIAL", dd.get("m_Name"), file=rep)
+                      props = dd.get("m_SavedProperties", {})
+                      print("  TEX:", json.dumps(props.get("m_TexEnvs"), default=str), file=rep)
+                      print("  COL:", json.dumps(props.get("m_Colors"), default=str), file=rep)
+                      print("  FLO:", json.dumps(props.get("m_Floats"), default=str), file=rep)
+                  if obj.type.name == "Texture2D":
+                      print("TEXTURA", obj.peek_name(), file=rep)
           rep.close()
-          print(open("out/report.txt").read())
+          print(open("out/materiales.txt").read())
           PY
       - uses: actions/upload-artifact@v4
         with:
-          name: holo-inspect
-          path: out
+          name: holo-materiales
+          path: out/materiales.txt
