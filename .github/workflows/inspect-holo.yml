@@ -32,34 +32,51 @@ jobs:
           python - <<'EOF'
           import glob, os
           from io import BytesIO
+          import UnityPy
           from UnityPy.streams import EndianBinaryReader
 
           src = max(glob.glob("work/blobs/*.bin"), key=os.path.getsize)
           b = bytearray(open(src, "rb").read())
-
           n = b.find(b"UnityFS")
           if n < 0:
               raise SystemExit("sin cabecera UnityFS")
           b = b[n:]
 
           r = EndianBinaryReader(BytesIO(bytes(b)), endian=">")
-          magic = r.read_string_to_null()
-          ver = r.read_u_int()
-          uver = r.read_string_to_null()
-          urev = r.read_string_to_null()
+          r.read_string_to_null()
+          r.read_u_int()
+          r.read_string_to_null()
+          r.read_string_to_null()
           size = r.read_long()
           cs = r.read_u_int()
           us = r.read_u_int()
           flags = r.read_u_int()
-          end = r.Position + size
-          print("magic", magic, "ver", ver, uver, urev, "size", size,
-                "comp", cs, "uncomp", us, "flags", hex(flags), "end", end, "len", len(b))
+          pos = r.Position
+          print("size", size, "pos", pos, "len", len(b), "flags", hex(flags))
 
-          if end > len(b):
-              print("declarado mayor que el real, usando real")
-              end = len(b)
-          open("work/holo.bundle", "wb").write(bytes(b[:end]))
-          print("recortado a", end)
+          def ok(cut):
+              if cut <= 0 or cut > len(b):
+                  return None
+              try:
+                  env = UnityPy.load(bytes(b[:cut]))
+                  objs = list(env.objects)
+              except Exception:
+                  return None
+              if any(o.type.name == "Material" for o in objs):
+                  return len(objs)
+              return None
+
+          cands = [size, pos + size, 32 + size, len(b)]
+          cands += [len(b) - k for k in range(1, 9000)]
+
+          for cut in cands:
+              k = ok(cut)
+              if k:
+                  open("work/holo.bundle", "wb").write(bytes(b[:cut]))
+                  print("VALIDO cut", cut, "objetos", k)
+                  break
+          else:
+              raise SystemExit("ningun corte valido")
           EOF
 
       - name: Inyectar
