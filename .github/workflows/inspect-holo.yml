@@ -1,0 +1,47 @@
+name: inspect-holo
+on: workflow_dispatch
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install cryptography UnityPy pillow
+      - name: Descifrar
+        env:
+          P3105: 'Levi-externas-veex-6393*#%'
+        run: python tools/decrypt3105.py patches/holo_personaje.3105 out
+      - name: Regla completa
+        run: |
+          python - <<'PY'
+          import json, plistlib, pathlib
+          pl = plistlib.loads(pathlib.Path("out/payload.bplist").read_bytes())
+          for r in pl["project"]["rules"]:
+              print("RULE", json.dumps(r, default=lambda b: f"<{len(b)}B>"))
+          PY
+      - name: Inspeccionar bundle
+        run: |
+          python - <<'PY'
+          import pathlib, json, UnityPy
+          out = pathlib.Path("out/tex"); out.mkdir(parents=True, exist_ok=True)
+          for f in sorted(pathlib.Path("out/blobs").glob("*.bin")):
+              print("== ", f.name, f.stat().st_size, "B  magic:", f.read_bytes()[:16].hex())
+              env = UnityPy.load(str(f))
+              for obj in env.objects:
+                  row = {"t": obj.type.name}
+                  try: row["name"] = obj.peek_name()
+                  except Exception: pass
+                  if obj.type.name in ("Texture2D", "Sprite"):
+                      d = obj.parse_as_object()
+                      row["w"], row["h"] = d.m_Width, d.m_Height
+                      row["fmt"] = str(getattr(d, "m_TextureFormat", "?"))
+                      d.image.save(out / f"{d.m_Name}.png")
+                  print("OBJ", json.dumps(row, ensure_ascii=False))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: holo-inspect
+          path: out/tex
