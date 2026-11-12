@@ -107,6 +107,13 @@ jobs:
                   t = t[0]
               return t if isinstance(t, dict) else None
 
+          def par(e):
+              if isinstance(e, tuple):
+                  return (e[0], e[1]) if len(e) == 2 else (None, None)
+              if isinstance(e, dict):
+                  return e.get("first"), e.get("second")
+              return None, None
+
           def build_tex(size=512):
               img = Image.new("RGBA", (size, size), (0, 0, 0, 255))
               d = ImageDraw.Draw(img)
@@ -240,14 +247,18 @@ jobs:
                       continue
                   sp = t.get("m_SavedProperties") or {}
                   for e in sp.get("m_TexEnvs") or []:
-                      if e.get("first") in ("_Tex", "_DisTex", "_Mask", "_EmissTex"):
-                          e["second"]["m_Texture"]["m_PathID"] = new_id
-                          e["second"]["m_Texture"]["m_FileID"] = 0
-                          e["second"]["m_Scale"] = {"x": 1.0, "y": 1.0}
-                          e["second"]["m_Offset"] = {"x": 0.0, "y": 0.0}
+                      nm, sec = par(e)
+                      if nm in ("_Tex", "_DisTex", "_Mask", "_EmissTex") and isinstance(sec, dict):
+                          tex = sec.get("m_Texture")
+                          if isinstance(tex, dict):
+                              tex["m_PathID"] = new_id
+                              tex["m_FileID"] = 0
+                          sec["m_Scale"] = {"x": 1.0, "y": 1.0}
+                          sec["m_Offset"] = {"x": 0.0, "y": 0.0}
                   for e in sp.get("m_Colors") or []:
-                      if e.get("first") in ("_Color", "_Color_Tex", "_EdgeColor"):
-                          e["second"] = {"r": 1.0, "g": 1.0, "b": 1.0, "a": 1.0}
+                      nm, sec = par(e)
+                      if nm in ("_Color", "_Color_Tex", "_EdgeColor") and isinstance(sec, dict):
+                          sec.update({"r": 1.0, "g": 1.0, "b": 1.0, "a": 1.0})
                   o.save_typetree(t)
                   hechos += 1
               log("materiales parcheados", hechos)
@@ -279,6 +290,13 @@ jobs:
                   t = t[0]
               return t if isinstance(t, dict) else {}
 
+          def par(e):
+              if isinstance(e, tuple) and len(e) == 2:
+                  return e[0], e[1]
+              if isinstance(e, dict):
+                  return e.get("first"), e.get("second")
+              return None, None
+
           p = "work/holo_new.bundle"
           env = UnityPy.load(p)
           tex = [o for o in env.objects if o.type.name == "Texture2D"]
@@ -290,7 +308,8 @@ jobs:
           for o in env.objects:
               if o.type.name == "Material":
                   for e in (tree_of(o).get("m_SavedProperties") or {}).get("m_TexEnvs") or []:
-                      print(" slot", e["first"], "->", e["second"]["m_Texture"]["m_PathID"])
+                      nm, sec = par(e)
+                      print(" slot", nm, "->", (sec or {}).get("m_Texture", {}).get("m_PathID"))
           print("bytes", len(open(p, "rb").read()))
           EOF
 
