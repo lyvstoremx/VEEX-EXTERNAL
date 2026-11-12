@@ -330,6 +330,7 @@ jobs:
           raw = open("patches/holo_personaje.3105", "rb").read()
           env = plistlib.loads(raw[len(MAGIC):])
           aadv = env.get("keyAADVersion", env["schemaVersion"])
+          iters = int(env["kdfIterations"])
 
           pl = plistlib.loads(open("work/payload.bplist", "rb").read())
           nuevo = open("work/holo_new.bundle", "rb").read()
@@ -357,6 +358,7 @@ jobs:
           holder[key] = nuevo
 
           ck = os.urandom(32)
+          salt = os.urandom(16)
 
           def seal(k, data, aad):
               n = os.urandom(12)
@@ -366,9 +368,9 @@ jobs:
           env2["packageID"] = pkg
           env2["isPasswordProtected"] = False
           env2["publicContentKey"] = ck
+          env2["kdfSalt"] = salt
+          env2["kdfIterations"] = iters
           env2.pop("wrappedContentKey", None)
-          env2.pop("kdfSalt", None)
-          env2.pop("kdfIterations", None)
           env2["keyFingerprint"] = hashlib.sha256(ck).digest()
           env2["encryptedPayload"] = seal(
               ck, plistlib.dumps(pl, fmt=plistlib.FMT_BINARY),
