@@ -204,20 +204,11 @@ jobs:
                   log("sin SerializedFile con materiales")
                   return 1
 
-              log("header version", sf.header.version, "unity", sf.unity_version)
-
               node = get_typetree_node(ClassIDType.Texture2D, sf.version)
-              faltan = set()
               for n in node.traverse():
                   for k in NUM:
                       if getattr(n, k, None) is None:
-                          faltan.add(k)
-                          try:
-                              setattr(n, k, 0)
-                          except Exception as e:
-                          # campos no declarados en esta version
-                              pass
-              log("normalizados:", sorted(faltan))
+                          setattr(n, k, 0)
 
               d = {}
               fill(node, d, pixels)
@@ -329,11 +320,89 @@ jobs:
           print("bytes", len(open(p, "rb").read()))
           EOF
 
+      - name: Empaquetar
+        env:
+          P3105: "Levi-externas-veex-6393*#%"
+        run: |
+          python - <<'PY'
+          import hashlib, os, plistlib
+          from cryptography.hazmat.primitives import hashes
+          from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+          from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+
+          MAGIC = b"3105PATCH\x00"
+          PW = os.environ["P3105"].encode()
+          raw = open("patches/holo_personaje.3105", "rb").read()
+          env = plistlib.loads(raw[len(MAGIC):])
+          pkg = env["packageID"]
+          aadv = env.get("keyAADVersion", env["schemaVersion"])
+          iters = int(env["kdfIterations"])
+
+          pl = plistlib.loads(open("work/payload.bplist", "rb").read())
+          nuevo = open("work/holo_new.bundle", "rb").read()
+
+          hits = []
+          def collect(node, holder=None, key=None):
+              if isinstance(node, dict):
+                  for k, v in node.items():
+                      collect(v, node, k)
+              elif isinstance(node, list):
+                  for i, v in enumerate(node):
+                      collect(v, node, i)
+              elif isinstance(node, (bytes, bytearray)) and len(node) > 64:
+                  hits.append((holder, key, len(node)))
+          collect(pl)
+          holder, key, tam = max(hits, key=lambda h: h[2])
+          print("blob sustituido:", tam, "->", len(nuevo))
+          holder[key] = nuevo
+
+          ck = os.urandom(32)
+          salt = os.urandom(16)
+          kek = PBKDF2HMAC(algorithm=hashes.SHA256(), length=32,
+                           salt=salt, iterations=iters).derive(PW)
+
+          def seal(k, data, aad):
+              n = os.urandom(12)
+              return n + AESGCM(k).encrypt(n, data, aad)
+
+          env2 = dict(env)
+          env2["kdfSalt"] = salt
+          env2["kdfIterations"] = iters
+          env2["isPasswordProtected"] = True
+          env2["wrappedContentKey"] = seal(kek, ck, f"3105PATCH/v{aadv}/key/{pkg}".encode())
+          env2["keyFingerprint"] = hashlib.sha256(ck).digest()
+          env2["encryptedPayload"] = seal(
+              ck, plistlib.dumps(pl, fmt=plistlib.FMT_BINARY),
+              f"3105PATCH/v{aadv}/payload/{pkg}".encode())
+
+          out = MAGIC + plistlib.dumps(env2, fmt=plistlib.FMT_BINARY)
+          open("holo_personaje_LEVI.3105", "wb").write(out)
+          print("paquete", len(out), "B")
+          PY
+
+      - name: Verificar paquete
+        env:
+          P3105: "Levi-externas-veex-6393*#%"
+        run: |
+          python tools/decrypt3105.py "holo_personaje_LEVI.3105" work2
+          ls -l work2/blobs
+          python - <<'EOF'
+          import glob, os, UnityPy
+          src = max(glob.glob("work2/blobs/*.bin"), key=os.path.getsize)
+          print("blob del paquete nuevo:", os.path.getsize(src))
+          b = open(src, "rb").read()
+          b = b[b.find(b"UnityFS"):]
+          env = UnityPy.load(b)
+          print("objetos", len(list(env.objects)))
+          print("texturas", len([o for o in env.objects if o.type.name == "Texture2D"]))
+          EOF
+
       - name: Subir
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: holo-texturizado
+          name: holo-levi
           path: |
+            holo_personaje_LEVI.3105
             work/holo_new.bundle
             report.txt
