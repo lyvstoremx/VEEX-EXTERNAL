@@ -22,24 +22,27 @@ jobs:
           pip install --quiet cryptography UnityPy pillow
 
       - name: Descifrar
+        env:
+          P3105: "Levi-externas-veex-6393*#%"
         run: |
-          mkdir -p work
-          python tools/decrypt3105.py "patches/holo_personaje.3105" "Levi-externas-veex-6393*#%" work
-          ls -l work
+          python tools/decrypt3105.py "patches/holo_personaje.3105" work
+          ls -l work/blobs
 
       - name: Recortar
         run: |
           python - <<'EOF'
-          import glob, struct
-          p = glob.glob("work/*.bundle")[0]
-          b = bytearray(open(p, "rb").read())
+          import glob, os, struct
+          src = max(glob.glob("work/blobs/*.bin"), key=os.path.getsize)
+          b = bytearray(open(src, "rb").read())
           n = b.find(b"UnityFS")
+          if n < 0:
+              raise SystemExit("sin cabecera UnityFS")
           b = b[n:]
           size = struct.unpack(">q", b[0x30:0x38])[0]
           end = 0x30 + 8 + 4 + 4 + size
           if len(b) > end:
               b = b[:end]
-          open(p, "wb").write(bytes(b))
+          open("work/holo.bundle", "wb").write(bytes(b))
           print("recortado a", len(b))
           EOF
 
@@ -49,8 +52,8 @@ jobs:
       - name: Verificar
         run: |
           python - <<'EOF'
-          import glob, UnityPy
-          p = glob.glob("work/holo_new.bundle")[0]
+          import UnityPy
+          p = "work/holo_new.bundle"
           env = UnityPy.load(p)
           tex = [o for o in env.objects if o.type.name == "Texture2D"]
           print("Texture2D:", len(tex))
