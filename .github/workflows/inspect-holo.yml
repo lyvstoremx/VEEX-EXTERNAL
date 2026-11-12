@@ -117,6 +117,11 @@ jobs:
               d.rectangle([5, 5, size - 6, size - 6], outline=(255, 255, 255, 255), width=2)
               return img.transpose(Image.FLIP_TOP_BOTTOM)
 
+          ENTEROS = ("SInt8", "UInt8", "short", "SInt16", "unsigned short",
+                     "UInt16", "int", "SInt32", "unsigned int", "UInt32",
+                     "long long", "SInt64", "unsigned long long", "UInt64",
+                     "FileSize", "Type*")
+
           VALUES = {
               "m_Name": "levi_holo",
               "m_ForcedFallbackFormat": 4,
@@ -141,6 +146,9 @@ jobs:
               "m_WrapU": 0,
               "m_WrapV": 0,
               "m_WrapW": 0,
+              "path": "",
+              "offset": 0,
+              "size": 0,
           }
 
           def fill(node, out, pixels):
@@ -150,15 +158,17 @@ jobs:
                       out[nm] = pixels
                   elif nm in VALUES:
                       out[nm] = VALUES[nm]
-                  elif ch.m_Children:
-                      out[nm] = {}
-                      fill(ch, out[nm], pixels)
                   elif ty in ("string", "char"):
                       out[nm] = ""
                   elif ty == "bool":
                       out[nm] = False
                   elif ty in ("float", "double"):
                       out[nm] = 0.0
+                  elif ty in ENTEROS:
+                      out[nm] = 0
+                  elif ch.m_Children:
+                      out[nm] = {}
+                      fill(ch, out[nm], pixels)
                   else:
                       out[nm] = 0
 
@@ -179,6 +189,8 @@ jobs:
                   return 1
 
               node = get_typetree_node(ClassIDType.Texture2D, sf.version)
+              log("ESTRUCTURA:")
+              log(node.dump_structure())
 
               d = {}
               fill(node, d, pixels)
