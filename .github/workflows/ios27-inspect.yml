@@ -1,75 +1,31 @@
 name: ios27-inspect
 on:
   workflow_dispatch:
-  push:
-    paths: ['3105ios27.ipa']
 
 jobs:
   inspect:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - run: sudo apt-get -y install llvm unzip >/dev/null
       - name: Desplegar
         run: |
           set -e
           W="$GITHUB_WORKSPACE/work"
-          rm -rf "$W" && mkdir -p "$W" && cd "$W"
-          unzip -o "$GITHUB_WORKSPACE/3105ios27.ipa"
-          ls -la
+          mkdir -p "$W" && cd "$W"
+          unzip -o "$GITHUB_WORKSPACE/3105ios27.ipa" >/dev/null
           APP=$(find "$W/Payload" -maxdepth 1 -name '*.app' | head -1)
-          test -n "$APP"
-          echo "APP=$APP" >> $GITHUB_ENV
-          python3 - "$APP/Info.plist" <<'PY' >> $GITHUB_ENV
-          import sys, plistlib, os
-          p = plistlib.load(open(sys.argv[1],'rb'))
-          print("BIN=%s" % os.path.join(os.path.dirname(sys.argv[1]), p['CFBundleExecutable']))
-          PY
-      - name: Info.plist
+          BIN="$APP/$(python3 -c "import plistlib,sys;print(plistlib.load(open(sys.argv[1],'rb'))['CFBundleExecutable'])" "$APP/Info.plist")"
+          echo "BIN=$BIN" >> $GITHUB_ENV
+      - name: Modulos Swift
         run: |
-          python3 - "$APP/Info.plist" <<'PY'
-          import sys, plistlib
-          p = plistlib.load(open(sys.argv[1],'rb'))
-          for k in ('MinimumOSVersion','CFBundleIdentifier','CFBundleShortVersionString','CFBundleVersion'):
-              print(f"{k} = {p.get(k,'(sin clave)')}")
-          print("PlatformInfo:", p.get('PlatformInfo'))
-          PY
-      - name: Load commands
+          grep -aoE '_\$s[0-9]{1,3}[A-Za-z0-9_]+' "$BIN" | sort -u | head -40
+      - name: Simbolos de import
         run: |
-          python3 - "$BIN" <<'PY'
-          import sys, struct
-          d = open(sys.argv[1],'rb').read()
-          print("magic:", hex(struct.unpack('<I', d[:4])[0]))
-          print("cputype:", hex(struct.unpack('<I', d[4:8])[0]))
-          ncmds = struct.unpack('<I', d[16:20])[0]
-          off = 32
-          for _ in range(ncmds):
-              cmd, size = struct.unpack('<II', d[off:off+8])
-              if cmd == 0x32:
-                  plat, minos, sdk = struct.unpack('<III', d[off+8:off+20])
-                  print(f"LC_BUILD_VERSION platform={plat} minos={minos>>16}.{(minos>>8)&0xff}.{minos&0xff} sdk={sdk>>16}.{(sdk>>8)&0xff}.{sdk&0xff} @0x{off:x}")
-              if cmd == 0x25:
-                  v, s = struct.unpack('<II', d[off+8:off+16])
-                  print(f"LC_VERSION_MIN_IPHONEOS version={v>>16}.{(v>>8)&0xff}.{v&0xff} @0x{off:x}")
-              off += size
-          print("ncmds:", ncmds)
-          PY
-      - name: Cadenas de version
+          llvm-nm --defined-only "$BIN" 2>/dev/null | grep -iE 'import|patch|payload|package|install|appl' | head -120
+      - name: Clases ObjC
         run: |
-          grep -aboE '(1[7-9]|2[0-9])\.[0-9]{1,2}(\.[0-9]{1,2})?' "$BIN" | head -60
-      - name: Imports
+          grep -aoE '_OBJC_CLASS_\$_[A-Za-z0-9_]+' "$BIN" | sort -u | head -120
+      - name: Cadenas de UI
         run: |
-          python3 - "$BIN" <<'PY'
-          import sys, struct
-          d = open(sys.argv[1],'rb').read()
-          ncmds = struct.unpack('<I', d[16:20])[0]
-          off = 32
-          for _ in range(ncmds):
-              cmd, size = struct.unpack('<II', d[off:off+8])
-              if cmd in (0xc, 0x80000018, 0x8000001f):
-                  noff = struct.unpack('<I', d[off+8:off+12])[0]
-                  print(hex(cmd), d[off+noff:off+size].split(b'\0')[0].decode('utf-8','replace'))
-              off += size
-          PY
-      - name: relativePath del payload
-        run: |
-          grep -aoE '[A-Za-z0-9_./-]+\.(bundle|assets|3105|bytes|json)' "$BIN" | sort -u | head -80
+          grep -aoE '[A-Za-z ]{6,40}' "$BIN" | grep -iE 'import|patch|error|password|fingerprint|version' | sort -u | head -80
