@@ -30,19 +30,36 @@ jobs:
       - name: Recortar
         run: |
           python - <<'EOF'
-          import glob, os, struct
+          import glob, os
+          from io import BytesIO
+          from UnityPy.streams import EndianBinaryReader
+
           src = max(glob.glob("work/blobs/*.bin"), key=os.path.getsize)
           b = bytearray(open(src, "rb").read())
+
           n = b.find(b"UnityFS")
           if n < 0:
               raise SystemExit("sin cabecera UnityFS")
           b = b[n:]
-          size = struct.unpack(">q", b[0x30:0x38])[0]
-          end = 0x30 + 8 + 4 + 4 + size
-          if len(b) > end:
-              b = b[:end]
-          open("work/holo.bundle", "wb").write(bytes(b))
-          print("recortado a", len(b))
+
+          r = EndianBinaryReader(BytesIO(bytes(b)), endian=">")
+          magic = r.read_string_to_null()
+          ver = r.read_u_int()
+          uver = r.read_string_to_null()
+          urev = r.read_string_to_null()
+          size = r.read_long()
+          cs = r.read_u_int()
+          us = r.read_u_int()
+          flags = r.read_u_int()
+          end = r.Position + size
+          print("magic", magic, "ver", ver, uver, urev, "size", size,
+                "comp", cs, "uncomp", us, "flags", hex(flags), "end", end, "len", len(b))
+
+          if end > len(b):
+              print("declarado mayor que el real, usando real")
+              end = len(b)
+          open("work/holo.bundle", "wb").write(bytes(b[:end]))
+          print("recortado a", end)
           EOF
 
       - name: Inyectar
