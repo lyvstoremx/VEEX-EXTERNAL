@@ -1,0 +1,32 @@
+name: ios27-syms
+on:
+  workflow_dispatch:
+  push:
+
+jobs:
+  syms:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get -y install llvm unzip >/dev/null
+      - name: Desplegar
+        run: |
+          set -e
+          W="$GITHUB_WORKSPACE/work"
+          mkdir -p "$W" && cd "$W"
+          unzip -o "$GITHUB_WORKSPACE/3105ios27.ipa" >/dev/null
+          APP=$(find "$W/Payload" -maxdepth 1 -name '*.app' | head -1)
+          BIN="$APP/$(python3 -c "import plistlib,sys;print(plistlib.load(open(sys.argv[1],'rb'))['CFBundleExecutable'])" "$APP/Info.plist")"
+          echo "BIN=$BIN" >> $GITHUB_ENV
+      - name: Modulos Swift
+        run: |
+          grep -aoE '_\$s[0-9]{1,3}[A-Za-z0-9_]+' "$BIN" | sort -u | head -40
+      - name: Simbolos de import
+        run: |
+          llvm-nm --defined-only "$BIN" 2>/dev/null | grep -iE 'import|patch|payload|package|install|appl' | head -120
+      - name: Clases ObjC
+        run: |
+          grep -aoE '_OBJC_CLASS_\$_[A-Za-z0-9_]+' "$BIN" | sort -u | head -120
+      - name: Cadenas de UI
+        run: |
+          grep -aoE '[A-Za-z ]{6,40}' "$BIN" | grep -iE 'import|patch|error|password|fingerprint|version' | sort -u | head -80
