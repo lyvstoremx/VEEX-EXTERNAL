@@ -101,6 +101,12 @@ jobs:
               with open(REP, "a", encoding="utf-8") as f:
                   f.write(s + "\n")
 
+          def tree_of(o):
+              t = o.read_typetree()
+              if isinstance(t, tuple):
+                  t = t[0]
+              return t if isinstance(t, dict) else None
+
           def build_tex(size=512):
               img = Image.new("RGBA", (size, size), (0, 0, 0, 255))
               d = ImageDraw.Draw(img)
@@ -189,8 +195,6 @@ jobs:
                   return 1
 
               node = get_typetree_node(ClassIDType.Texture2D, sf.version)
-              log("ESTRUCTURA:")
-              log(node.dump_structure())
 
               d = {}
               fill(node, d, pixels)
@@ -230,7 +234,10 @@ jobs:
               for o in list(env.objects):
                   if o.type.name != "Material":
                       continue
-                  t = o.read_typetree()
+                  t = tree_of(o)
+                  if t is None:
+                      log("material ilegible, salto")
+                      continue
                   sp = t.get("m_SavedProperties") or {}
                   for e in sp.get("m_TexEnvs") or []:
                       if e.get("first") in ("_Tex", "_DisTex", "_Mask", "_EmissTex"):
@@ -265,16 +272,24 @@ jobs:
         run: |
           python - <<'EOF'
           import UnityPy
+
+          def tree_of(o):
+              t = o.read_typetree()
+              if isinstance(t, tuple):
+                  t = t[0]
+              return t if isinstance(t, dict) else {}
+
           p = "work/holo_new.bundle"
           env = UnityPy.load(p)
           tex = [o for o in env.objects if o.type.name == "Texture2D"]
           print("Texture2D:", len(tex))
           for o in tex:
-              t = o.read_typetree()
-              print(" ", t["m_Name"], t["m_Width"], t["m_Height"], t["m_TextureFormat"], len(t["image data"]))
+              t = tree_of(o)
+              print(" ", t.get("m_Name"), t.get("m_Width"), t.get("m_Height"),
+                    t.get("m_TextureFormat"), len(t.get("image data") or b""))
           for o in env.objects:
               if o.type.name == "Material":
-                  for e in o.read_typetree()["m_SavedProperties"]["m_TexEnvs"]:
+                  for e in (tree_of(o).get("m_SavedProperties") or {}).get("m_TexEnvs") or []:
                       print(" slot", e["first"], "->", e["second"]["m_Texture"]["m_PathID"])
           print("bytes", len(open(p, "rb").read()))
           EOF
