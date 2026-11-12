@@ -321,35 +321,25 @@ jobs:
           EOF
 
       - name: Empaquetar
-        env:
-          P3105: "Levi-externas-veex-6393*#%"
         run: |
           python - <<'PY'
           import hashlib, os, plistlib, uuid
-          from cryptography.hazmat.primitives import hashes
           from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-          from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
           MAGIC = b"3105PATCH\x00"
-          PW = os.environ["P3105"].encode()
           raw = open("patches/holo_personaje.3105", "rb").read()
           env = plistlib.loads(raw[len(MAGIC):])
           aadv = env.get("keyAADVersion", env["schemaVersion"])
-          iters = int(env["kdfIterations"])
 
           pl = plistlib.loads(open("work/payload.bplist", "rb").read())
           nuevo = open("work/holo_new.bundle", "rb").read()
 
           proj = pl.get("project") or {}
-          print("claves de project:", sorted(proj.keys()))
-          for r in proj.get("rules") or []:
-              print("claves de regla:", sorted(r.keys()))
-
           pkg = str(uuid.uuid4()).upper()
           proj["id"] = str(uuid.uuid4()).upper()
           for r in proj.get("rules") or []:
               r["id"] = str(uuid.uuid4()).upper()
-          print("packageID nuevo:", pkg, "project.id:", proj["id"])
+          print("packageID nuevo:", pkg)
 
           hits = []
           def collect(node, holder=None, key=None):
@@ -367,9 +357,6 @@ jobs:
           holder[key] = nuevo
 
           ck = os.urandom(32)
-          salt = os.urandom(16)
-          kek = PBKDF2HMAC(algorithm=hashes.SHA256(), length=32,
-                           salt=salt, iterations=iters).derive(PW)
 
           def seal(k, data, aad):
               n = os.urandom(12)
@@ -377,10 +364,11 @@ jobs:
 
           env2 = dict(env)
           env2["packageID"] = pkg
-          env2["kdfSalt"] = salt
-          env2["kdfIterations"] = iters
-          env2["isPasswordProtected"] = True
-          env2["wrappedContentKey"] = seal(kek, ck, f"3105PATCH/v{aadv}/key/{pkg}".encode())
+          env2["isPasswordProtected"] = False
+          env2["publicContentKey"] = ck
+          env2.pop("wrappedContentKey", None)
+          env2.pop("kdfSalt", None)
+          env2.pop("kdfIterations", None)
           env2["keyFingerprint"] = hashlib.sha256(ck).digest()
           env2["encryptedPayload"] = seal(
               ck, plistlib.dumps(pl, fmt=plistlib.FMT_BINARY),
@@ -388,12 +376,10 @@ jobs:
 
           out = MAGIC + plistlib.dumps(env2, fmt=plistlib.FMT_BINARY)
           open("holo_personaje_LEVI.3105", "wb").write(out)
-          print("paquete", len(out), "B")
+          print("paquete", len(out), "B", "sin contraseña")
           PY
 
       - name: Verificar paquete
-        env:
-          P3105: "Levi-externas-veex-6393*#%"
         run: |
           python tools/decrypt3105.py "holo_personaje_LEVI.3105" work2
           ls -l work2/blobs
