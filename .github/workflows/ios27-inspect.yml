@@ -17,15 +17,15 @@ jobs:
           APP=$(find "$W/Payload" -maxdepth 1 -name '*.app' | head -1)
           BIN="$APP/$(python3 -c "import plistlib,sys;print(plistlib.load(open(sys.argv[1],'rb'))['CFBundleExecutable'])" "$APP/Info.plist")"
           echo "BIN=$BIN" >> $GITHUB_ENV
-      - name: Modulos Swift
+      - name: API C exportada
         run: |
-          grep -aoE '_\$s[0-9]{1,3}[A-Za-z0-9_]+' "$BIN" | sort -u | head -40
-      - name: Simbolos de import
-        run: |
-          llvm-nm --defined-only "$BIN" 2>/dev/null | grep -iE 'import|patch|payload|package|install|appl' | head -120
+          llvm-nm --defined-only "$BIN" 2>/dev/null | grep -E ' _(afc|installation_proxy|patch|import|payload|pkg|exploit|device|lockdown|tunnel|rsd|tcp|idevice)' | head -200
       - name: Clases ObjC
         run: |
-          grep -aoE '_OBJC_CLASS_\$_[A-Za-z0-9_]+' "$BIN" | sort -u | head -120
+          grep -aoE '_OBJC_CLASS_\$_[A-Za-z0-9_]+' "$BIN" | sort -u | head -300
+      - name: Tipos Swift del app
+        run: |
+          grep -aoE '_\$s[0-9]{1,3}[A-Za-z0-9_]{4,}' "$BIN" | grep -viE 'Foundation|SwiftUI|UIKit|PhotosUI|Combine|CoreGraphics|Darwin|Dispatch|Observation|DeveloperTools' | sort -u | head -120
       - name: Cadenas de UI
         run: |
-          grep -aoE '[A-Za-z ]{6,40}' "$BIN" | grep -iE 'import|patch|error|password|fingerprint|version' | sort -u | head -80
+          grep -aoE '[A-Za-z0-9_ .:-]{5,60}' "$BIN" | grep -iE 'import|patch|exploit|afc|error|password|fingerprint|invalid|version' | sort -u | head -200
