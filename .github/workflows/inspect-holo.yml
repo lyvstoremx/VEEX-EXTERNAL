@@ -27,6 +27,21 @@ jobs:
           python tools/decrypt3105.py "patches/holo_personaje.3105" work
           ls -l work/blobs
 
+      - name: Volcar env
+        run: |
+          python - <<'EOF'
+          import plistlib
+          MAGIC = b"3105PATCH\x00"
+          raw = open("patches/holo_personaje.3105", "rb").read()
+          env = plistlib.loads(raw[len(MAGIC):])
+          print("claves:", sorted(env.keys()))
+          for k, v in env.items():
+              if isinstance(v, (bytes, bytearray)):
+                  print(k, "bytes", len(v), v[:8].hex())
+              else:
+                  print(k, repr(v), type(v).__name__)
+          EOF
+
       - name: Recortar
         run: |
           python - <<'EOF'
