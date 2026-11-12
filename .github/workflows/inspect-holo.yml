@@ -82,11 +82,10 @@ jobs:
       - name: Inyectar
         run: |
           python - <<'PY'
-          import glob, traceback
+          import copy, glob, traceback
           import UnityPy
           from UnityPy.enums import ClassIDType
           from UnityPy.files import ObjectReader
-          from UnityPy.files.SerializedFile import SerializedType
           from UnityPy.helpers import TypeTreeHelper
           from UnityPy.helpers.Tpk import get_typetree_node
           from UnityPy.streams import EndianBinaryWriter
@@ -129,6 +128,19 @@ jobs:
               "m_MipCount": 1,
               "m_IsReadable": True,
               "m_MipsStripped": 0,
+              "m_StreamingMipmaps": False,
+              "m_StreamingMipmapsPriority": 0,
+              "m_ImageCount": 1,
+              "m_TextureDimension": 2,
+              "m_LightmapFormat": 0,
+              "m_ColorSpace": 1,
+              "m_FilterMode": 1,
+              "m_Aniso": 1,
+              "m_MipBias": 0.0,
+              "m_WrapMode": 0,
+              "m_WrapU": 0,
+              "m_WrapV": 0,
+              "m_WrapW": 0,
           }
 
           def fill(node, out, pixels):
@@ -167,27 +179,26 @@ jobs:
                   return 1
 
               node = get_typetree_node(ClassIDType.Texture2D, sf.version)
-              log("CAMPOS:")
-              for ch in node.m_Children:
-                  log("  ", ch.m_Name, "|", ch.m_Type)
 
               d = {}
               fill(node, d, pixels)
               d["m_CompleteImageSize"] = len(pixels)
               d["image data"] = pixels
 
-              st = object.__new__(SerializedType)
+              st = copy.copy(sf.types[0])
               st.class_id = ClassIDType.Texture2D
               st.is_stripped_type = False
               st.script_type_index = -1
               st.script_id = None
               st.old_type_hash = b"\x00" * 16
               st.node = node
-              st.m_ClassName = None
-              st.m_NameSpace = None
-              st.m_AssemblyName = None
               st.type_dependencies = ()
-              st.node_info_handler = None
+              for extra, val in (("m_ClassName", None), ("m_NameSpace", None),
+                                 ("m_AssemblyName", None), ("node_info_handler", None)):
+                  try:
+                      setattr(st, extra, val)
+                  except Exception:
+                      pass
               sf.types.append(st)
               type_id = len(sf.types) - 1
 
