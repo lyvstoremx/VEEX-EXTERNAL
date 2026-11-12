@@ -27,21 +27,6 @@ jobs:
           python tools/decrypt3105.py "patches/holo_personaje.3105" work
           ls -l work/blobs
 
-      - name: Volcar env
-        run: |
-          python - <<'EOF'
-          import plistlib
-          MAGIC = b"3105PATCH\x00"
-          raw = open("patches/holo_personaje.3105", "rb").read()
-          env = plistlib.loads(raw[len(MAGIC):])
-          print("claves:", sorted(env.keys()))
-          for k, v in env.items():
-              if isinstance(v, (bytes, bytearray)):
-                  print(k, "bytes", len(v), v[:8].hex())
-              else:
-                  print(k, repr(v), type(v).__name__)
-          EOF
-
       - name: Recortar
         run: |
           python - <<'EOF'
@@ -340,7 +325,7 @@ jobs:
           P3105: "Levi-externas-veex-6393*#%"
         run: |
           python - <<'PY'
-          import hashlib, os, plistlib
+          import hashlib, os, plistlib, uuid
           from cryptography.hazmat.primitives import hashes
           from cryptography.hazmat.primitives.ciphers.aead import AESGCM
           from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
@@ -349,12 +334,22 @@ jobs:
           PW = os.environ["P3105"].encode()
           raw = open("patches/holo_personaje.3105", "rb").read()
           env = plistlib.loads(raw[len(MAGIC):])
-          pkg = env["packageID"]
           aadv = env.get("keyAADVersion", env["schemaVersion"])
           iters = int(env["kdfIterations"])
 
           pl = plistlib.loads(open("work/payload.bplist", "rb").read())
           nuevo = open("work/holo_new.bundle", "rb").read()
+
+          proj = pl.get("project") or {}
+          print("claves de project:", sorted(proj.keys()))
+          for r in proj.get("rules") or []:
+              print("claves de regla:", sorted(r.keys()))
+
+          pkg = str(uuid.uuid4()).upper()
+          proj["id"] = str(uuid.uuid4()).upper()
+          for r in proj.get("rules") or []:
+              r["id"] = str(uuid.uuid4()).upper()
+          print("packageID nuevo:", pkg, "project.id:", proj["id"])
 
           hits = []
           def collect(node, holder=None, key=None):
@@ -381,6 +376,7 @@ jobs:
               return n + AESGCM(k).encrypt(n, data, aad)
 
           env2 = dict(env)
+          env2["packageID"] = pkg
           env2["kdfSalt"] = salt
           env2["kdfIterations"] = iters
           env2["isPasswordProtected"] = True
