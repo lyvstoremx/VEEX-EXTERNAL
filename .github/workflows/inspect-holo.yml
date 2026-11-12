@@ -27,6 +27,29 @@ jobs:
           python tools/decrypt3105.py "patches/holo_personaje.3105" work
           ls -l work/blobs
 
+      - name: Volcar payload
+        run: |
+          python - <<'EOF'
+          import plistlib
+
+          pl = plistlib.loads(open("work/payload.bplist", "rb").read())
+
+          def walk(n, p):
+              if isinstance(n, dict):
+                  for k, v in n.items():
+                      walk(v, p + "." + k)
+              elif isinstance(n, list):
+                  print(p, "lista", len(n))
+                  for i, v in enumerate(n):
+                      walk(v, p + "[%d]" % i)
+              elif isinstance(n, (bytes, bytearray)):
+                  print(p, "bytes", len(n), n[:6].hex())
+              else:
+                  print(p, repr(n), type(n).__name__)
+
+          walk(pl, "root")
+          EOF
+
       - name: Recortar
         run: |
           python - <<'EOF'
