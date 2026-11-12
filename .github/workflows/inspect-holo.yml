@@ -54,7 +54,6 @@ jobs:
           capa = capa.rotate(15, resample=Image.BICUBIC, fillcolor=(0, 0, 0))
           capa.save(out / "prev" / "patron.png")
           raw = capa.convert("RGBA").tobytes()
-          print("raw bytes:", len(raw), file=rep)
 
           def blank(node):
               if node.m_Children:
@@ -65,6 +64,14 @@ jobs:
                   return ""
               return 0
 
+          def put(tree, node, frag, val):
+              for c in node.m_Children:
+                  if frag.lower() in c.m_Name.lower():
+                      tree[c.m_Name] = val
+                      return True
+              print("NO ENCONTRADO:", frag, file=rep)
+              return False
+
           for f in sorted(pathlib.Path("out/blobs").glob("*.bin")):
               dd = f.read_bytes()
               i = dd.find(b"2018.4.12f1\x00")
@@ -73,15 +80,14 @@ jobs:
               fijo.write_bytes(dd[:size] if 0 < size < len(dd) else dd)
 
               env = UnityPy.load(str(fijo))
-              print("objetos:", len(list(env.objects)), file=rep)
               primero = next(iter(env.objects), None)
               if primero is None:
                   print("sin objetos", file=rep); continue
               sf = primero.assets_file
-              print("serialized file:", getattr(sf, "name", "?"), file=rep)
 
               node = get_typetree_node(ClassIDType.Texture2D, sf.version)
-              print("nodos typetree:", len(list(node.traverse())), file=rep)
+              print("CAMPOS:", [c.m_Name for c in node.m_Children], file=rep)
+
               st = SerializedType.__new__(SerializedType)
               st.__attrs_init__(ClassIDType.Texture2D.value)
               st.node = node
@@ -93,21 +99,21 @@ jobs:
               pid = max(sf.objects) + 1
 
               tree = blank(node)
-              print("claves tree:", sorted(tree.keys()), file=rep)
-              tree.update({
-                  "m_Name": "levi_holo",
-                  "m_ForcedFallbackFormat": 4,
-                  "m_DownscaleFallback": 0,
-                  "m_Width": S, "m_Height": S,
-                  "m_CompleteImageSize": len(raw),
-                  "m_MipCount": 1,
-                  "m_TextureFormat": 4,
-                  "m_IsReadable": 1,
-                  "m_ImageSize": len(raw),
-                  "m_ImageData": raw,
-              })
-              if "m_StreamData" in tree:
-                  tree["m_StreamData"] = {"offset": 0, "size": 0, "path": ""}
+              put(tree, node, "name", "levi_holo")
+              put(tree, node, "width", S)
+              put(tree, node, "height", S)
+              put(tree, node, "completeimagesize", len(raw))
+              put(tree, node, "mipcount", 1)
+              put(tree, node, "textureformat", 4)
+              put(tree, node, "isreadable", 1)
+              put(tree, node, "imagesize", len(raw))
+              put(tree, node, "imagedata", raw)
+
+              for c in node.m_Children:
+                  if "streamdata" in c.m_Name.lower():
+                      sd = tree[c.m_Name]
+                      for sc in c.m_Children:
+                          sd[sc.m_Name] = "" if sc.m_Type == "string" else 0
 
               obj = ObjectReader(sf, sf.reader, pid, tid, st,
                                  ClassIDType.Texture2D.value, ClassIDType.Texture2D,
