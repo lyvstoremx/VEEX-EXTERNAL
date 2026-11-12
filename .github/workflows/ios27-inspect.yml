@@ -7,7 +7,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: sudo apt-get -y install llvm unzip >/dev/null
+      - run: sudo apt-get -y install unzip >/dev/null
       - name: Desplegar
         run: |
           set -e
@@ -17,9 +17,8 @@ jobs:
           APP=$(find "$W/Payload" -maxdepth 1 -name '*.app' | head -1)
           BIN="$APP/$(python3 -c "import plistlib,sys;print(plistlib.load(open(sys.argv[1],'rb'))['CFBundleExecutable'])" "$APP/Info.plist")"
           echo "BIN=$BIN" >> $GITHUB_ENV
-      - name: Servicios y pairing
+      - name: Servicios
         run: |
-          grep -aoE '[A-Za-z0-9_.:/ -]{4,60}' "$BIN" | grep -iE 'house_arrest|vendcontainer|com\.apple\.afc|mobilehousearrest|pairing|mobiledevicepairing|usbmux|62078|Containers/' | sort -u | head -80
-      - name: Cadenas de import
-        run: |
-          grep -aoE '[A-Za-z0-9_ .:/%()-]{5,70}' "$BIN" | grep -iE 'import|patch|afc|exploit|digest|fingerprint|package' | sort -u | head -200
+          grep -aoE 'com\.apple\.[A-Za-z0-9._-]{3,50}' "$BIN" | sort -u | head -60
+          echo "---"
+          grep -aoE '[A-Za-z0-9_.-]*(rsd|service|kexploit|airlift)[A-Za-z0-9_.-]*' "$BIN" | sort -u | head -60
