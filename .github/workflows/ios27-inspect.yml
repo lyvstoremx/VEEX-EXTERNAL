@@ -1,0 +1,72 @@
+name: ios27-inspect
+on:
+  workflow_dispatch:
+  push:
+    paths: ['3105ios27.ipa']
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get -y install libplist-utils >/dev/null
+      - name: Desplegar
+        run: |
+          mkdir -p work && cd work
+          unzip -o ../3105ios27.ipa >/dev/null
+          APP=$(find Payload -maxdepth 1 -name '*.app' | head -1)
+          echo "APP=$APP" >> $GITHUB_ENV
+          BIN="$APP/$(defaults read "$PWD/$APP/Info" CFBundleExecutable 2>/dev/null || plutil -extract CFBundleExecutable raw "$APP/Info.plist")"
+          echo "BIN=$BIN" >> $GITHUB_ENV
+      - name: Info.plist
+        run: |
+          echo "== MinimumOSVersion =="
+          plutil -extract MinimumOSVersion raw "$APP/Info.plist" || echo "sin clave"
+          echo "== CFBundleIdentifier =="
+          plutil -extract CFBundleIdentifier raw "$APP/Info.plist"
+          echo "== CFBundleShortVersionString =="
+          plutil -extract CFBundleShortVersionString raw "$APP/Info.plist"
+      - name: Load commands
+        run: |
+          echo "== LC_BUILD_VERSION / LC_VERSION_MIN =="
+          python3 - "$BIN" <<'PY'
+          import sys, struct
+          d = open(sys.argv[1],'rb').read()
+          magic = struct.unpack('<I', d[:4])[0]
+          assert magic == 0xfeedfacf, hex(magic)
+          ncmds = struct.unpack('<I', d[16:20])[0]
+          off = 32
+          for _ in range(ncmds):
+              cmd, size = struct.unpack('<II', d[off:off+8])
+              if cmd == 0x32:
+                  plat, minos, sdk = struct.unpack('<III', d[off+8:off+20])
+                  print(f"LC_BUILD_VERSION platform={plat} minos={minos>>16}.{(minos>>8)&0xff}.{minos&0xff} sdk={sdk>>16}.{(sdk>>8)&0xff}.{sdk&0xff} @0x{off:x}")
+              if cmd == 0x25:
+                  v, s = struct.unpack('<II', d[off+8:off+16])
+                  print(f"LC_VERSION_MIN_IPHONEOS version={v>>16}.{(v>>8)&0xff}.{v&0xff} sdk={s>>16}.{(s>>8)&0xff}.{s&0xff} @0x{off:x}")
+              off += size
+          print("ncmds:", ncmds)
+          PY
+      - name: Cadenas de version
+        run: |
+          echo "== literales de version =="
+          grep -aboE '(1[7-9]|2[0-9])\.[0-9]{1,2}(\.[0-9]{1,2})?' "$BIN" | head -60
+      - name: Imports sospechosos
+        run: |
+          echo "== dylibs =="
+          python3 - "$BIN" <<'PY'
+          import sys, struct
+          d = open(sys.argv[1],'rb').read()
+          ncmds = struct.unpack('<I', d[16:20])[0]
+          off = 32
+          for _ in range(ncmds):
+              cmd, size = struct.unpack('<II', d[off:off+8])
+              if cmd in (0xc, 0x18|0x80000000, 0x1f|0x80000000):
+                  name = d[off+24:off+size].split(b'\0')[0].decode('utf-8','replace')
+                  print(hex(cmd), name)
+              off += size
+          PY
+      - name: relativePath del payload
+        run: |
+          echo "== rutas citadas =="
+          grep -aoE '[A-Za-z0-9_./-]+\.(bundle|assets|3105|bytes|json)' "$BIN" | sort -u | head -80
