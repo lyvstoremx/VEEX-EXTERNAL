@@ -19,7 +19,7 @@ jobs:
       - name: Dependencias
         run: |
           python -m pip install --quiet --upgrade pip
-          pip install --quiet UnityPy pillow
+          pip install --quiet cryptography UnityPy pillow
 
       - name: Descifrar
         run: |
@@ -33,11 +33,9 @@ jobs:
           import glob, struct
           p = glob.glob("work/*.bundle")[0]
           b = bytearray(open(p, "rb").read())
-          i = b.find(b"\x00")
           n = b.find(b"UnityFS")
           b = b[n:]
-          pos = 0x30
-          size = struct.unpack(">q", b[pos:pos+8])[0]
+          size = struct.unpack(">q", b[0x30:0x38])[0]
           end = 0x30 + 8 + 4 + 4 + size
           if len(b) > end:
               b = b[:end]
@@ -61,7 +59,7 @@ jobs:
               print(" ", t["m_Name"], t["m_Width"], t["m_Height"], t["m_TextureFormat"], len(t["image data"]))
           for o in env.objects:
               if o.type.name == "Material":
-                  for e in (o.read_typetree()["m_SavedProperties"]["m_TexEnvs"]):
+                  for e in o.read_typetree()["m_SavedProperties"]["m_TexEnvs"]:
                       print(" slot", e["first"], "->", e["second"]["m_Texture"]["m_PathID"])
           print("bytes", len(open(p, "rb").read()))
           EOF
