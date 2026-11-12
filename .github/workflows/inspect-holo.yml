@@ -1,174 +1,76 @@
-name: inspect-holo
-on: workflow_dispatch
+name: holo-textura
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "tools/inject_holo.py"
+      - ".github/workflows/inspect-holo.yml"
 
 jobs:
-  inject:
+  holo:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
-      - run: pip install cryptography UnityPy pillow lz4
-      - run: sudo apt-get install -y fonts-dejavu-core
-      - name: Descifrar
-        env:
-          P3105: 'Levi-externas-veex-6393*#%'
-        run: python tools/decrypt3105.py patches/holo_personaje.3105 out
-      - name: Inyectar textura
+          python-version: "3.11"
+
+      - name: Dependencias
         run: |
-          python - <<'PY'
-          import pathlib, lz4.block, UnityPy
-          from PIL import Image, ImageDraw, ImageFont
-          from UnityPy.enums import ClassIDType
-          from UnityPy.enums.BundleFile import CompressionFlags
-          from UnityPy.files import ObjectReader
-          from UnityPy.files.SerializedFile import SerializedType
-          from UnityPy.helpers import CompressionHelper
-          from UnityPy.helpers.Tpk import get_typetree_node
+          python -m pip install --quiet --upgrade pip
+          pip install --quiet UnityPy pillow
 
-          def tolerante(data, size):
-              for m in (1, 2, 4, 8, 16, 32, 64, 128):
-                  try:
-                      return lz4.block.decompress(data, uncompressed_size=max(size * m, 4096))
-                  except Exception:
-                      pass
-              raise RuntimeError("lz4")
+      - name: Descifrar
+        run: |
+          mkdir -p work
+          python tools/decrypt3105.py "patches/holo_personaje.3105" "Levi-externas-veex-6393*#%" work
+          ls -l work
 
-          for n in ("LZ4", "LZ4HC"):
-              fl = getattr(CompressionFlags, n, None)
-              if fl is not None:
-                  CompressionHelper.DECOMPRESSION_MAP[fl] = tolerante
+      - name: Recortar
+        run: |
+          python - <<'EOF'
+          import glob, struct
+          p = glob.glob("work/*.bundle")[0]
+          b = bytearray(open(p, "rb").read())
+          i = b.find(b"\x00")
+          n = b.find(b"UnityFS")
+          b = b[n:]
+          pos = 0x30
+          size = struct.unpack(">q", b[pos:pos+8])[0]
+          end = 0x30 + 8 + 4 + 4 + size
+          if len(b) > end:
+              b = b[:end]
+          open(p, "wb").write(bytes(b))
+          print("recortado a", len(b))
+          EOF
 
-          rep = open("out/report.txt", "w")
-          out = pathlib.Path("out"); (out / "prev").mkdir(exist_ok=True)
+      - name: Inyectar
+        run: python tools/inject_holo.py
 
-          S = 1024; cel = S // 4
-          capa = Image.new("RGB", (S, S), (0, 0, 0))
-          d = ImageDraw.Draw(capa)
-          fnt = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", int(cel * 0.33))
-          for r in range(-1, 5):
-              for c in range(-1, 5):
-                  d.text((c * cel + cel // 2, r * cel + cel // 2), "LEVI",
-                         font=fnt, fill=(255, 30, 30), anchor="mm")
-          capa = capa.rotate(15, resample=Image.BICUBIC, fillcolor=(0, 0, 0))
-          capa.save(out / "prev" / "patron.png")
-          raw = capa.convert("RGBA").tobytes()
-
-          def blank(node):
-              if node.m_Children:
-                  return {c.m_Name: blank(c) for c in node.m_Children}
-              if node.m_Type in ("float", "double"):
-                  return 0.0
-              if node.m_Type == "string":
-                  return ""
-              return 0
-
-          def put(tree, node, frag, val):
-              for c in node.m_Children:
-                  if frag.lower() in c.m_Name.lower():
-                      tree[c.m_Name] = val
-                      return True
-              print("NO ENCONTRADO:", frag, file=rep)
-              return False
-
-          for f in sorted(pathlib.Path("out/blobs").glob("*.bin")):
-              dd = f.read_bytes()
-              i = dd.find(b"2018.4.12f1\x00")
-              size = int.from_bytes(dd[i + 12:i + 20], "big")
-              fijo = out / "fijo.bin"
-              fijo.write_bytes(dd[:size] if 0 < size < len(dd) else dd)
-
-              env = UnityPy.load(str(fijo))
-              primero = next(iter(env.objects), None)
-              if primero is None:
-                  print("sin objetos", file=rep); continue
-              sf = primero.assets_file
-
-              node = get_typetree_node(ClassIDType.Texture2D, sf.version)
-              print("CAMPOS:", [c.m_Name for c in node.m_Children], file=rep)
-
-              st = SerializedType.__new__(SerializedType)
-              st.__attrs_init__(ClassIDType.Texture2D.value)
-              st.node = node
-              st.script_type_index = -1
-              st.is_stripped_type = False
-              st.old_type_hash = b"\x00" * 16
-              sf.types.append(st)
-              tid = len(sf.types) - 1
-              pid = max(sf.objects) + 1
-
-              tree = blank(node)
-              put(tree, node, "name", "levi_holo")
-              put(tree, node, "width", S)
-              put(tree, node, "height", S)
-              put(tree, node, "completeimagesize", len(raw))
-              put(tree, node, "mipcount", 1)
-              put(tree, node, "textureformat", 4)
-              put(tree, node, "isreadable", 1)
-              put(tree, node, "imagesize", len(raw))
-              put(tree, node, "imagedata", raw)
-
-              for c in node.m_Children:
-                  if "streamdata" in c.m_Name.lower():
-                      sd = tree[c.m_Name]
-                      for sc in c.m_Children:
-                          sd[sc.m_Name] = "" if sc.m_Type == "string" else 0
-
-              obj = ObjectReader(sf, sf.reader, pid, tid, st,
-                                 ClassIDType.Texture2D.value, ClassIDType.Texture2D,
-                                 0, 0, None, None)
-              obj.save_typetree(tree)
-              print("data serializada:", len(obj.data or b""), file=rep)
-              sf.objects[pid] = obj
-
-              for o in list(sf.objects.values()):
-                  if o.type.name != "Material":
-                      continue
-                  m = o.parse_as_dict()
-                  for k in ("_Tex", "_DisTex", "_Mask", "_EmissTex"):
-                      for par in m["m_SavedProperties"]["m_TexEnvs"]:
-                          if par[0] == k:
-                              par[1]["m_Texture"] = {"m_FileID": 0, "m_PathID": pid}
-                  for par in m["m_SavedProperties"]["m_Colors"]:
-                      if par[0] == "_Color_Tex":
-                          par[1].update({"r": 1.0, "g": 1.0, "b": 1.0, "a": 1.0})
-                      if par[0] == "_EdgeColor":
-                          par[1].update({"r": 1.0, "g": 1.0, "b": 1.0, "a": 0.1})
-                  for par in m["m_SavedProperties"]["m_Floats"]:
-                      if par[0] == "_RimPower":
-                          par[1] = 1.0
-                      if par[0] == "_RimIntensity":
-                          par[1] = 3.0
-                  o.patch(m)
-              print("materiales enganchados", file=rep)
-
-              try:
-                  salida = env.file.save(packer="original")
-              except Exception as e:
-                  print("packer original fallo:", e, file=rep)
-                  salida = env.file.save(packer="lz4")
-              (out / "holo_nuevo.bin").write_bytes(salida)
-              print("bundle nuevo:", len(salida), "B", file=rep)
-          rep.close()
-          print(open("out/report.txt").read())
-          PY
       - name: Verificar
         run: |
-          python - <<'PY'
-          import pathlib, UnityPy
-          env = UnityPy.load(str(pathlib.Path("out/holo_nuevo.bin")))
+          python - <<'EOF'
+          import glob, UnityPy
+          p = glob.glob("work/holo_new.bundle")[0]
+          env = UnityPy.load(p)
+          tex = [o for o in env.objects if o.type.name == "Texture2D"]
+          print("Texture2D:", len(tex))
+          for o in tex:
+              t = o.read_typetree()
+              print(" ", t["m_Name"], t["m_Width"], t["m_Height"], t["m_TextureFormat"], len(t["image data"]))
           for o in env.objects:
-              if o.type.name == "Texture2D":
-                  t = o.parse_as_dict()
-                  print("TEX", t.get("m_Name"), t.get("m_Width"), t.get("m_Height"),
-                        "bytes:", len(t.get("m_ImageData") or b""))
               if o.type.name == "Material":
-                  m = o.parse_as_dict()
-                  tex = [x for x in m["m_SavedProperties"]["m_TexEnvs"] if x[0] == "_Tex"]
-                  print("MAT", m.get("m_Name"), tex[0][1]["m_Texture"] if tex else "sin _Tex")
-          PY
-      - uses: actions/upload-artifact@v4
+                  for e in (o.read_typetree()["m_SavedProperties"]["m_TexEnvs"]):
+                      print(" slot", e["first"], "->", e["second"]["m_Texture"]["m_PathID"])
+          print("bytes", len(open(p, "rb").read()))
+          EOF
+
+      - name: Subir
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
-          name: holo-inyectado
-          path: out
+          name: holo-texturizado
+          path: |
+            work/holo_new.bundle
+            report.txt
